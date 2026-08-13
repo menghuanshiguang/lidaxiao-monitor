@@ -1,16 +1,16 @@
 # ===== 密钥与隐私数据 (绝不提交) =====
-.env
-data/
-downloads/
-reports/
-login_qr.html
+/.env
+/data/
+/downloads/
+/reports/
+/login_qr.html
 
 # ===== 依赖与工具 (自行安装, 不随仓库分发) =====
-_repo/
-tools/
+/_repo/
+/tools/
 
 # ===== 运行时生成 =====
-_setup/LiDaxiaoMonitor.xml
+/_setup/LiDaxiaoMonitor.xml
 
 # ===== Python =====
 __pycache__/

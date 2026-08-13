@@ -1,0 +1,129 @@
+name: LiDaxiao Monitor
+
+# 定时(北京时间): 10:00 / 12:00 / 14:50(收盘前) / 20:00 / 22:30
+# 北京时间 = UTC + 8
+on:
+  schedule:
+    - cron: '0 2 * * *'     # 10:00
+    - cron: '0 4 * * *'     # 12:00
+    - cron: '50 6 * * *'    # 14:50
+    - cron: '0 12 * * *'    # 20:00
+    - cron: '30 14 * * *'   # 22:30
+  workflow_dispatch:        # 手动触发
+
+concurrency:
+  group: lidaxiao-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write           # 允许提交报告回仓库
+
+jobs:
+  monitor:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python deps
+        run: |
+          pip install --disable-pip-version-check yt-dlp qrcode pillow requests rapidocr-onnxruntime
+          # python3 垫片 (bilidown bash 脚本调用 python3)
+          $py = (Get-Command python).Source
+          Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path "$env:APPDATA\Python\Python312\Scripts\python3.exe")) {
+            New-Item -ItemType Directory -Force "$env:APPDATA\Python\Python312\Scripts" | Out-Null
+            Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force
+          }
+        shell: pwsh
+
+      - name: Install ffmpeg
+        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+
+      - name: Clone bilidown CLI
+        run: |
+          git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
+
+      - name: Write Bilibili cookies (from secret)
+        shell: pwsh
+        env:
+          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
+        run: |
+          if (-not $env:COOKIES_B64) { Write-Error "缺少 BILIBILI_COOKIES_B64 secret (B站登录cookies, base64)" }
+          $bytes = [Convert]::FromBase64String($env:COOKIES_B64)
+          New-Item -ItemType Directory -Force data | Out-Null
+          New-Item -ItemType Directory -Force "$env:USERPROFILE\.cache" | Out-Null
+          [IO.File]::WriteAllBytes("$env:USERPROFILE\.cache\bilibili-login-cookies.txt", $bytes)
+          [IO.File]::WriteAllBytes("data\cookies.txt", $bytes)
+          Write-Host "cookies 写入完成 ($($bytes.Length) bytes)"
+
+      - name: Restore state cache (last_bvid / processed / subtitles)
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: lidaxiao-data-${{ github.ref }}
+          restore-keys: |
+            lidaxiao-data-
+
+      - name: Run monitor
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          BILIDOWN_BASH: 'C:\Program Files\Git\bin\bash.exe'
+          PYTHONIOENCODING: utf-8
+        run: |
+          # 清理可能残留的锁
+          Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
+          python monitor.py
+
+      - name: Publish reports to repo (docs/reports)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 报告从运行产物复制到 docs/reports, 保留最近30天 + latest.md
+          if (Test-Path reports) {
+            New-Item -ItemType Directory -Force docs\reports | Out-Null
+            Copy-Item reports\*.md docs\reports\ -Force
+            # 清理 30 天前的报告
+            $cut = (Get-Date).AddDays(-30)
+            Get-ChildItem docs\reports -Filter *.md | Where-Object {
+              $_.Name -match '^\d{4}-\d{2}-\d{2}\.md$' -and $_.LastWriteTime -lt $cut
+            } | Remove-Item -Force
+            # latest.md 副本 (README 醒目展示用)
+            $latest = Get-ChildItem docs\reports -Filter '*.md' | Where-Object { $_.Name -ne 'latest.md' } |
+                      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($latest) { Copy-Item $latest.FullName docs\reports\latest.md -Force }
+            # 生成索引页
+            $links = Get-ChildItem docs\reports -Filter '*.md' | Where-Object { $_.Name -ne 'latest.md' } |
+                     Sort-Object Name -Descending |
+                     ForEach-Object { "- [$($_.BaseName)](./$($_.Name))" }
+            Set-Content -Path docs\reports\index.md -Value ("# 📺 李大霄视频日报索引`n`n$links`n") -Encoding UTF8
+            git config user.name "lidaxiao-monitor[bot]"
+            git config user.email "actions@users.noreply.github.com"
+            git add docs/reports
+            if (git diff --cached --quiet) {
+              Write-Host "报告无变化, 跳过提交"
+            } else {
+              git commit -m "docs: update daily reports [skip ci]"
+              git push origin HEAD:main
+              Write-Host "报告已提交到 docs/reports/"
+            }
+          } else {
+            Write-Host "今日无新视频, 无报告更新"
+          }
+
+      - name: Upload reports as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
+        if: always()
