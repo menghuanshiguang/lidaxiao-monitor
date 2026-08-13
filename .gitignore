@@ -1,0 +1,27 @@
+# ===== 密钥与隐私数据 (绝不提交) =====
+.env
+data/
+downloads/
+reports/
+login_qr.html
+
+# ===== 依赖与工具 (自行安装, 不随仓库分发) =====
+_repo/
+tools/
+
+# ===== 运行时生成 =====
+_setup/LiDaxiaoMonitor.xml
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# ===== 系统/编辑器 =====
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/

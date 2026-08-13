@@ -1,0 +1,15 @@
+{
+  "uid": "2137589551",
+  "limit": 10,
+  "frame_interval": 0.0,
+  "ocr_confidence": 0.5,
+  "min_subtitle_chars": 30,
+  "dl_retries": 1,
+  "llm_retries": 3,
+  "llm": {
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "temperature": 0.3,
+    "max_tokens": 4000
+  }
+}
