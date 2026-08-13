@@ -34,14 +34,11 @@ jobs:
 
       - name: Install Python deps
         run: |
-          pip install --disable-pip-version-check yt-dlp qrcode pillow requests rapidocr-onnxruntime
+          pip install --disable-pip-version-check -r requirements.txt
           # python3 垫片 (bilidown bash 脚本调用 python3)
           $py = (Get-Command python).Source
-          Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force -ErrorAction SilentlyContinue
-          if (-not (Test-Path "$env:APPDATA\Python\Python312\Scripts\python3.exe")) {
-            New-Item -ItemType Directory -Force "$env:APPDATA\Python\Python312\Scripts" | Out-Null
-            Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force
-          }
+          New-Item -ItemType Directory -Force "$env:APPDATA\Python\Python312\Scripts" | Out-Null
+          Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force
         shell: pwsh
 
       - name: Install ffmpeg

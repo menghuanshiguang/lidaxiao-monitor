@@ -1,0 +1,7 @@
+# LiDaxiao Monitor 运行依赖
+# Windows GPU 加速可选: pip install onnxruntime-directml (RTX 显卡)
+yt-dlp>=2024.1.0
+qrcode>=7.4
+pillow>=10.0
+requests>=2.31
+rapidocr-onnxruntime>=1.4.0
