@@ -24,7 +24,7 @@
 | **今日/最新日报** | [📄 latest.md](./docs/reports/latest.md) |
 | **历史日报索引** | [📚 全部日报](./docs/reports/index.md) |
 
-> 报告由 GitHub Actions 定时(每天 5 次:北京时间 10:00 / 12:00 / 14:50 / 20:00 / 22:30)
+> 报告由 GitHub Actions 定时(每天 2 次:北京时间 **14:40** 和 **20:00**)
 > 自动检测 → 下载 → OCR → AI 分析生成,并提交到 `docs/reports/`(日报保留 30 天,
 > 周报每周五更新)。
 
