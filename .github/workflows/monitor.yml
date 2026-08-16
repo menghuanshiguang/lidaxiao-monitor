@@ -29,12 +29,7 @@ jobs:
           cache: 'pip'
 
       - name: Install Python deps
-        run: |
-          pip install --disable-pip-version-check -r requirements.txt
-          # python3 垫片 (bilidown bash 脚本调用 python3)
-          $py = (Get-Command python).Source
-          New-Item -ItemType Directory -Force "$env:APPDATA\Python\Python312\Scripts" | Out-Null
-          Copy-Item $py "$env:APPDATA\Python\Python312\Scripts\python3.exe" -Force
+        run: pip install --disable-pip-version-check -r requirements.txt
         shell: pwsh
 
       - name: Install ffmpeg
@@ -69,7 +64,6 @@ jobs:
       - name: Run monitor
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          BILIDOWN_BASH: 'C:\Program Files\Git\bin\bash.exe'
           PYTHONIOENCODING: utf-8
         run: |
           # 清理可能残留的锁

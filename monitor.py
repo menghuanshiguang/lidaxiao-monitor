@@ -195,16 +195,23 @@ class RunLock:
 
 # ---------------- bilidown 调用 ----------------
 def run_bilidown(cfg, args, timeout=600):
+    """调用 bilidown CLI: 优先 v2.0+ Python 单文件版, 兼容旧 bash 版"""
     env = os.environ.copy()
-    env["HOME"] = os.path.expanduser("~")
-    env.setdefault("PATH", "")
-    # 保证 bash 内能找到 python3/yt-dlp/ffmpeg
-    extra = [os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Python",
-                          "Python312", "Scripts"),
-             r"C:\Program Files\Python312", FFMPEG_DIR]
-    env["PATH"] = os.pathsep.join(extra + [env["PATH"]])
-    cmd = [BASH, BILIDOWN_SCRIPT] + args
-    log(f"运行: bilidown {' '.join(args)}")
+    env["PATH"] = os.pathsep.join([FFMPEG_DIR, env.get("PATH", "")])
+    py_script = os.path.join(WORKDIR, "_repo", "bin", "bilidown.py")
+    if os.path.exists(py_script):
+        cmd = [sys.executable, py_script] + args          # v2.0+: python bilidown.py
+        log(f"运行: bilidown {' '.join(args)}")
+    elif os.path.exists(BILIDOWN_SCRIPT):
+        env["HOME"] = os.path.expanduser("~")
+        extra = [os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Python",
+                              "Python312", "Scripts")]
+        env["PATH"] = os.pathsep.join(extra + [env["PATH"]])
+        cmd = [BASH, BILIDOWN_SCRIPT] + args              # 旧版: bash bin/bilidown
+        log(f"运行: bilidown(bash) {' '.join(args)}")
+    else:
+        log("❌ 未找到 bilidown: 请克隆 https://github.com/menghuanshiguang/bilibili-downloader-cli 到 _repo/")
+        return 127, "", ""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace",
@@ -320,7 +327,7 @@ def download_video(cfg, bvid, retries=None):
             log(f"视频已存在, 跳过下载: {existing}")
             return existing
         rc, out, err = run_bilidown(
-            cfg, ["dl", bvid, "video", win_to_msys(outdir), "mp4", "480", "1"],
+            cfg, ["dl", bvid, "video", outdir, "mp4", "480", "1"],
             timeout=900)
         ok = rc == 0
         if not ok:
