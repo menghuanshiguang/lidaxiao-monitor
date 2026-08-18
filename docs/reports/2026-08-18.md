@@ -3,10 +3,26 @@
 ## 今日摘要
 
 
+
+
 ## 视频清单
+- [18:51] 美债收益率飙涨 美股或将有反应 (BV1Bv8u6NEUd) 04:54
+- [16:22] 警惕美股融资潮 (BV11P8g6LEg1) 05:55
 - [14:03] 缩量反弹转防御 (BV1jtb667EnB) 06:04
 
 ## 视频1:《缩量反弹转防御》 (BV1jtb667EnB)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+## 视频2:《警惕美股融资潮》 (BV11P8g6LEg1)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+## 视频3:《美债收益率飙涨 美股或将有反应》 (BV1Bv8u6NEUd)
 
 > ⚠️ AI分析失败, 仅保留字幕
 
