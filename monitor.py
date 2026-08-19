@@ -111,6 +111,7 @@ def load_config(path=None):
             "model": "batiai/qwen3.6-35b:iq3",
             "temperature": 0.3,
             "max_tokens": 8000,
+            "timeout": 600,
         },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
@@ -642,7 +643,7 @@ def _call_llm_once(pcfg, api_key, system, user):
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    r = requests.post(url, json=payload, timeout=180, headers=headers)
+    r = requests.post(url, json=payload, timeout=pcfg.get("timeout", 180), headers=headers)
     r.raise_for_status()
     j = r.json()
     return j["choices"][0]["message"]["content"].strip()
