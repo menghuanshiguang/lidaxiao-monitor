@@ -684,7 +684,7 @@ def _clone_dsc(pcfg):
     return False
 
 
-def _call_dsc(pcfg, token, system, user):
+def _call_dsc(pcfg, token, prompt):
     """调用 deepseek-chat-cli (dsc.py): 网页版登录 token 走浏览器对话"""
     dsc_py = _find_dsc_path(pcfg)
     if not dsc_py:
@@ -710,8 +710,6 @@ def _call_dsc(pcfg, token, system, user):
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(tok)
 
-    # dsc 是纯用户对话 CLI, 把 system+user 合并成一条提示词
-    prompt = f"{system}\n\n{user}"
     cmd = [sys.executable, os.path.abspath(dsc_py), prompt]
     log(f"调用 deepseek-chat-cli ({os.path.basename(dsc_py)})...")
     # dsc.py 支持 DSC_TIMEOUT 环境变量控制回答等待时长
@@ -735,7 +733,7 @@ def _call_dsc(pcfg, token, system, user):
     return out
 
 
-def call_llm(cfg, api_key, system, user):
+def call_llm(cfg, api_key, system, user, dsc_prompt=None):
     """按顺序尝试 LLM provider:
     1) opencode-go (主)
     2) deepseek-chat-cli (DeepSeek 网页版, 第二兜底)
@@ -761,7 +759,7 @@ def call_llm(cfg, api_key, system, user):
         try:
             if provider == "deepseek-chat-cli":
                 log(f"调用 LLM {provider}...")
-                out = _call_dsc(pcfg, key, system, user)
+                out = _call_dsc(pcfg, key, dsc_prompt or f"{system}\n\n{user}")
             else:
                 log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
                 out = _call_llm_once(pcfg, key, system, user)
@@ -810,6 +808,45 @@ ANALYZE_SYSTEM = """你是资深财经媒体分析助手, 专精解读A股著名
 最后必须另起一行输出: 以上为李大霄个人观点提炼,不构成投资建议"""
 
 
+def clean_subtitle_for_prompt(subtitle_text):
+    """去掉 [MM:SS] 时间戳和换行, 用中文逗号连接, 适合 C 端对话"""
+    import re
+    lines = []
+    for ln in (subtitle_text or "").splitlines():
+        s = re.sub(r"^\[\d{1,2}:\d{2}(?::\d{2})?\]\s*", "", ln).strip()
+        if s:
+            lines.append(s)
+    return "，".join(lines)
+
+
+def build_dsc_prompt(video, subtitle_text, history):
+    """构造给 deepseek-chat-cli 的自然 C 端提示词(保持原输出格式)"""
+    date = datetime.datetime.fromtimestamp(video.get("pubdate", 0), CN_TZ).strftime("%Y-%m-%d")
+    clean_sub = clean_subtitle_for_prompt(subtitle_text)[:12000]
+    return f"""你好，请以资深财经分析的角度，帮我分析一下李大霄这条视频的内容，并按下面的 Markdown 格式输出（全部使用简体中文）：
+
+视频日期：{date}
+视频标题：{video['title']}
+视频时长：{video.get('dur_str', '')}
+
+视频字幕（已去掉时间戳）：
+{clean_sub}
+
+最近 5 天的历史报告（供你对比观点是否延续/升级/新增/反转）：
+{history or "(无历史报告)"}
+
+请按以下格式输出：
+【一句话摘要】用一句话概括本期视频的核心结论
+【核心观点】3-8条, 每条必须包含原文数据(点位/百分比/日期等), 格式: N. 观点 (原文数据: ...)
+【关键数据清单】列出视频中出现的具体数据: 美债收益率/巴菲特指标/见顶时间表/指数点位/成交量等, 格式: - 数据项: 数值
+【暗示提取】李大霄常说"不是推荐", 这实为合规话术下的真实关注点。请逐条列出并判断语境属于"机会暗示"或"风险警示", 每条标注: 🔴警示 / 🟢看多 / ⚪中性 / ⚠️风险
+【市场定性】判断市场定性: 反弹/反转/见顶/调整/防御。注意他的核心框架: "没量=不是反转"。给出判断依据。
+【操作含义】三层面: 方向(看多/看空/观望), 仓位(建议的仓位变化), 风险(需要警惕的风险点)。其中方向、仓位、风险里的关键词（如看多/看空/观望、加仓/减仓、进攻/防御等）请用 **加粗** 标出。
+【观点连续性】与历史报告对比: 标注 延续/升级/新增/反转。如态度升级(如"警惕→高度警惕")必须重点标出。无历史报告则写"首次记录,无历史对比"。
+
+最后必须另起一行输出：以上为李大霄个人观点提炼,不构成投资建议"""
+
+
 def analyze_subtitles(cfg, api_key, video, subtitle_text, history):
     date = datetime.datetime.fromtimestamp(video.get("pubdate", 0), CN_TZ).strftime("%Y-%m-%d")
     user = f"""【视频信息】
@@ -825,7 +862,8 @@ def analyze_subtitles(cfg, api_key, video, subtitle_text, history):
 
 请按模板输出分析。"""
     sys_prompt = ANALYZE_SYSTEM
-    return call_llm(cfg, api_key, sys_prompt, user)
+    dsc_prompt = build_dsc_prompt(video, subtitle_text, history)
+    return call_llm(cfg, api_key, sys_prompt, user, dsc_prompt=dsc_prompt)
 
 
 # =====================================================================

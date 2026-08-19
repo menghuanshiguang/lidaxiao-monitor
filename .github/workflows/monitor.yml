@@ -82,8 +82,7 @@ jobs:
         run: |
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
-          # 单视频验证: 只处理最新 1 个视频 (--force)
-          python monitor.py --force
+          python monitor.py
 
       - name: Publish reports to repo (docs/reports)
         shell: pwsh
