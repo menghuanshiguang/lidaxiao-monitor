@@ -105,10 +105,10 @@ def load_config(path=None):
             "token_env": "DSV_TOKEN",
             "timeout": 300,
         },
-        "llm_ollama": {                         # 本地模式: Ollama qwen2.5:7b (无 key)
+        "llm_ollama": {                         # 本地模式: Ollama (无 key)
             "provider": "ollama",
             "base_url": "http://localhost:11434/v1",
-            "model": "qwen2.5:7b",
+            "model": "batiai/qwen3.6-35b:iq3",
             "temperature": 0.3,
             "max_tokens": 8000,
         },

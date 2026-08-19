@@ -15,6 +15,7 @@
 """
 import argparse
 import datetime
+import json
 import os
 import re
 import shutil
@@ -252,6 +253,30 @@ def reset_local_state():
         log(f"⚠️ 重置 last_bvid 失败: {e}")
 
 
+def get_ollama_model():
+    try:
+        with open(os.path.join(WORKDIR, "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        return cfg.get("llm_ollama", {}).get("model", "batiai/qwen3.6-35b:iq3")
+    except Exception:
+        return "batiai/qwen3.6-35b:iq3"
+
+
+def stop_ollama_model(model):
+    """提交报告后停止 Ollama 模型, 释放显存/内存"""
+    log(f"命令: ollama stop {model}")
+    try:
+        r = subprocess.run(["ollama", "stop", model], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+        if r.returncode != 0:
+            log("⚠️ 停止 Ollama 模型失败")
+        else:
+            log("✅ 已停止 Ollama 模型, 释放内存")
+    except Exception as e:
+        log(f"⚠️ 停止 Ollama 模型异常: {e}")
+
+
 def run_slot(args):
     today = today_str()
     now_date = datetime.datetime.now(CN_TZ).date()
@@ -266,7 +291,8 @@ def run_slot(args):
     if cloud_run_in_progress():
         log("☁️ 云端任务进行中, 本地跳过")
         return
-    log("🚀 云端未处理, 本地开始运行 (Ollama qwen2.5:7b)")
+    model = get_ollama_model()
+    log(f"🚀 云端未处理, 本地开始运行 (Ollama {model})")
     set_local_claimed()
     try:
         sync_state_from_remote()   # 先同步云端 state, 本地受制于云端
@@ -274,6 +300,7 @@ def run_slot(args):
         run_monitor(args)
         publish_reports(args)
     finally:
+        stop_ollama_model(model)   # 提交报告后停止大模型, 释放内存
         clear_local_claimed()
 
 

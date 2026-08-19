@@ -24,7 +24,7 @@
   "llm_ollama": {
     "provider": "ollama",
     "base_url": "http://localhost:11434/v1",
-    "model": "qwen2.5:7b",
+    "model": "batiai/qwen3.6-35b:iq3",
     "temperature": 0.3,
     "max_tokens": 8000
   },
