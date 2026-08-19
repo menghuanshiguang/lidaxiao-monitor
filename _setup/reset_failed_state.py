@@ -79,7 +79,8 @@ def main():
     print(f"昨天以来 BV: {len(recent)} -> {sorted(recent)}")
     print(f"待清理 BV 总数: {len(targets)}")
 
-    proc = os.path.join("data", "processed.txt")
+    os.makedirs("state", exist_ok=True)
+    proc = os.path.join("state", "processed.txt")
     if os.path.exists(proc):
         with open(proc, encoding="utf-8") as f:
             lines = [ln.rstrip("\n") for ln in f if ln.strip()]
@@ -98,7 +99,7 @@ def main():
     else:
         print("processed.txt 不存在, 跳过")
 
-    with open(os.path.join("data", "last_bvid.txt"), "w", encoding="utf-8") as f:
+    with open(os.path.join("state", "last_bvid.txt"), "w", encoding="utf-8") as f:
         f.write("BV0reset")
     print("last_bvid -> BV0reset")
 

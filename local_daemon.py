@@ -214,7 +214,7 @@ def publish_reports(args):
                            text=True, timeout=30).stdout.strip()
     push_url = f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
     try:
-        subprocess.run(["git", "add", "docs/reports"], cwd=WORKDIR,
+        subprocess.run(["git", "add", "docs/reports", "state"], cwd=WORKDIR,
                        check=True, capture_output=True, timeout=30)
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
                               capture_output=True, timeout=30)
@@ -230,10 +230,22 @@ def publish_reports(args):
         log(f"⚠️ 报告发布失败: {e}")
 
 
+def sync_state_from_remote():
+    """运行前同步远端状态(state/processed.txt, last_bvid.txt), 保证本地和云端一份"""
+    try:
+        r = subprocess.run(["git", "pull", "--ff-only"], cwd=WORKDIR, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=60)
+        log(f"同步远端状态: 返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+    except Exception as e:
+        log(f"⚠️ 同步远端状态失败: {e}")
+
+
 def reset_local_state():
     """运行前把 last_bvid 置为哨兵, 让 monitor 按'昨天以来+未处理'重新扫描, 避免被旧 last_bvid 卡住"""
     try:
-        with open(os.path.join(WORKDIR, "data", "last_bvid.txt"), "w", encoding="utf-8") as f:
+        state_dir = os.path.join(WORKDIR, "state")
+        os.makedirs(state_dir, exist_ok=True)
+        with open(os.path.join(state_dir, "last_bvid.txt"), "w", encoding="utf-8") as f:
             f.write("BV0reset")
         log("已重置 last_bvid=BV0reset (重新扫描昨天以来未处理视频)")
     except Exception as e:
@@ -263,6 +275,7 @@ def run_slot(args):
     log("🚀 云端未处理, 本地开始运行 (Ollama qwen2.5:7b)")
     set_local_claimed()
     try:
+        sync_state_from_remote()   # 先同步云端 state, 本地受制于云端
         reset_local_state()
         run_monitor(args)
         publish_reports(args)

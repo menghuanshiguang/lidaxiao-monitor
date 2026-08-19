@@ -34,6 +34,7 @@ import urllib.request
 
 # ---------- 常量 ----------
 WORKDIR = os.path.dirname(os.path.abspath(__file__))
+STATE_DIR = os.path.join(WORKDIR, "state")   # 云端/本地共享状态, 入库同步
 # bash 路径可用环境变量 BILIDOWN_BASH 覆盖 (如 WSL/GitBash 安装在不同位置)
 BASH = os.environ.get("BILIDOWN_BASH", r"D:\Program Files\Git\bin\bash.exe")
 BILIDOWN_SCRIPT = os.path.join(WORKDIR, "_repo", "bin", "bilidown")
@@ -1108,7 +1109,8 @@ def list_line(video):
 
 
 def mark_processed(bvid, title, status):
-    p = os.path.join(WORKDIR, "data", "processed.txt")
+    os.makedirs(STATE_DIR, exist_ok=True)
+    p = os.path.join(STATE_DIR, "processed.txt")
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"{bvid}|{stamp}|{status}|{title}"
     with open(p, "a", encoding="utf-8") as f:
@@ -1117,7 +1119,7 @@ def mark_processed(bvid, title, status):
 
 def processed_bvids():
     return {l.split("|")[0] for l in read_state_lines(
-        os.path.join(WORKDIR, "data", "processed.txt"))}
+        os.path.join(STATE_DIR, "processed.txt"))}
 
 
 def is_from_yesterday(video):
@@ -1164,7 +1166,7 @@ def main():
             log("昨天以来暂无新视频, 退出")
             return 0
         latest = videos[0]
-        last_file = os.path.join(WORKDIR, "data", "last_bvid.txt")
+        last_file = os.path.join(STATE_DIR, "last_bvid.txt")
         last_bvid = read_text(last_file).strip()
         done = processed_bvids()
 
