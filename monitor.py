@@ -1110,12 +1110,14 @@ def processed_bvids():
         os.path.join(WORKDIR, "data", "processed.txt"))}
 
 
-def is_today_video(video):
-    """是否北京时间今天发布的视频(今天以前的忽略)"""
+def is_from_yesterday(video):
+    """是否北京时间昨天(含)之后发布的视频(基线=昨天, 更早的忽略)"""
     ts = video.get("pubdate") or video.get("created")
     if not ts:
         return False
-    return datetime.datetime.fromtimestamp(ts, CN_TZ).date() == datetime.datetime.now(CN_TZ).date()
+    d = datetime.datetime.fromtimestamp(ts, CN_TZ).date()
+    baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)
+    return d >= baseline
 
 
 def main():
@@ -1146,10 +1148,10 @@ def main():
         if not videos:
             log("❌ 无法获取UP主视频列表(风控或网络问题)")
             return 1
-        # 只处理今天(北京时间)发布的视频, 今天以前的全部忽略
-        videos = [v for v in videos if is_today_video(v)]
+        # 只处理昨天(北京时间)及之后发布的视频, 更早的忽略
+        videos = [v for v in videos if is_from_yesterday(v)]
         if not videos:
-            log("今天暂无新视频, 退出")
+            log("昨天以来暂无新视频, 退出")
             return 0
         latest = videos[0]
         last_file = os.path.join(WORKDIR, "data", "last_bvid.txt")

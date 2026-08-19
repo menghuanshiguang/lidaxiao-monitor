@@ -49,9 +49,9 @@ def extract_failed_bvids():
     return bvids
 
 
-def today_bvids():
-    """按北京时间今天的发布日期, 返回今天的 BV 集合"""
-    today = datetime.datetime.now(CN_TZ).date()
+def recent_bvids(days=1):
+    """按北京时间发布日期, 返回基线(昨天)及之后的 BV 集合"""
+    baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=days)
     bvids = set()
     for f in ("data/pubdates.json", "data/all_videos.json"):
         if not os.path.exists(f):
@@ -66,17 +66,17 @@ def today_bvids():
             ts = v.get("created") or v.get("pubdate")
             if ts:
                 d = datetime.datetime.fromtimestamp(ts, CN_TZ).date()
-                if d == today:
+                if d >= baseline:
                     bvids.add(v.get("bvid"))
     return bvids
 
 
 def main():
     failed = extract_failed_bvids()
-    today = today_bvids()
-    targets = failed | today
+    recent = recent_bvids(1)
+    targets = failed | recent
     print(f"失败/超时 BV: {len(failed)} -> {sorted(failed)}")
-    print(f"今日 BV: {len(today)} -> {sorted(today)}")
+    print(f"昨天以来 BV: {len(recent)} -> {sorted(recent)}")
     print(f"待清理 BV 总数: {len(targets)}")
 
     proc = os.path.join("data", "processed.txt")
