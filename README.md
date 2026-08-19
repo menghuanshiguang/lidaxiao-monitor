@@ -79,6 +79,11 @@ echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env
 python _setup/login_wait.py     # 浏览器打开二维码, B站App扫码
 ```
 
+> 本地启用 `deepseek-chat-cli` 兜底(可选): 首次会自动克隆公开仓库, 还需要安装它的依赖
+> ```bash
+> pip install -r _repo/deepseek-chat-cli/requirements.txt
+> ```
+
 ### 3️⃣ 运行
 
 ```bash
