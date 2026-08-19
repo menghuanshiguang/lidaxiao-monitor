@@ -1098,6 +1098,14 @@ def processed_bvids():
         os.path.join(WORKDIR, "data", "processed.txt"))}
 
 
+def is_today_video(video):
+    """是否北京时间今天发布的视频(今天以前的忽略)"""
+    ts = video.get("pubdate") or video.get("created")
+    if not ts:
+        return False
+    return datetime.datetime.fromtimestamp(ts, CN_TZ).date() == datetime.datetime.now(CN_TZ).date()
+
+
 def main():
     ap = argparse.ArgumentParser(description="李大霄视频自动监控分析系统")
     ap.add_argument("--force", action="store_true",
@@ -1126,6 +1134,11 @@ def main():
         if not videos:
             log("❌ 无法获取UP主视频列表(风控或网络问题)")
             return 1
+        # 只处理今天(北京时间)发布的视频, 今天以前的全部忽略
+        videos = [v for v in videos if is_today_video(v)]
+        if not videos:
+            log("今天暂无新视频, 退出")
+            return 0
         latest = videos[0]
         last_file = os.path.join(WORKDIR, "data", "last_bvid.txt")
         last_bvid = read_text(last_file).strip()
