@@ -120,6 +120,29 @@ def clear_local_claimed():
         log(f"⚠️ 删除认领标志异常: {e}")
 
 
+def claim_is_fresh(max_age_minutes=30):
+    """查询 GitHub 认领标志是否新鲜(本地是否在跑), 供云端判断"""
+    cmd = ["gh", "variable", "get", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO]
+    log(f"命令: {' '.join(cmd)}")
+    try:
+        r = subprocess.run(cmd, check=False, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        if r.returncode != 0:
+            log("查询认领标志: 不存在")
+            return False
+        val = r.stdout.strip()
+        log(f"查询认领标志: {val!r}")
+        if not val:
+            return False
+        t = datetime.datetime.fromisoformat(val.replace("Z", "+00:00"))
+        age = (datetime.datetime.now(UTC) - t).total_seconds() / 60
+        log(f"认领标志年龄: {age:.1f} 分钟")
+        return age <= max_age_minutes
+    except Exception as e:
+        log(f"⚠️ 查询认领标志异常: {e}")
+        return False
+
+
 def cloud_report_exists(today):
     url = f"https://raw.githubusercontent.com/{REPO}/main/docs/reports/{today}.md"
     log(f"检查云端报告: GET {url}")
@@ -164,12 +187,13 @@ def cloud_run_in_progress(hours=3):
     return False
 
 
-def run_monitor(args):
+def run_monitor(args, local=True):
     cmd = [sys.executable, os.path.join(WORKDIR, "monitor.py")]
     if args.config:
         cmd += ["--config", args.config]
     env = dict(os.environ)
-    env["LIDAXIAO_LOCAL"] = "1"
+    if local:
+        env["LIDAXIAO_LOCAL"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     log("执行: " + " ".join(cmd))
     try:
@@ -179,8 +203,8 @@ def run_monitor(args):
         log(f"❌ 本地 monitor 运行异常: {e}")
 
 
-def publish_reports(args):
-    """把本地生成的 reports/ 自动提交并推送到 GitHub docs/reports"""
+def publish_reports(args, tag="local"):
+    """把生成的 reports/ 自动提交并推送到 GitHub docs/reports; tag 标识 local/cloud"""
     reports_dir = os.path.join(WORKDIR, "reports")
     docs_dir = os.path.join(WORKDIR, "docs", "reports")
     if not os.path.isdir(reports_dir):
@@ -221,12 +245,17 @@ def publish_reports(args):
     try:
         subprocess.run(["git", "add", "docs/reports", "state"], cwd=WORKDIR,
                        check=True, capture_output=True, timeout=30)
+        # 云端 Actions 没有全局 git user, 统一设置(本地也无害)
+        subprocess.run(["git", "config", "user.name", "lidaxiao-monitor[bot]"],
+                       cwd=WORKDIR, capture_output=True, timeout=15)
+        subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"],
+                       cwd=WORKDIR, capture_output=True, timeout=15)
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
                               capture_output=True, timeout=30)
         if diff.returncode == 0:
             log("报告无变化, 跳过提交")
             return
-        subprocess.run(["git", "commit", "-m", "docs: update local reports [local] [skip ci]"],
+        subprocess.run(["git", "commit", "-m", f"docs: update reports [{tag}] [skip ci]"],
                        cwd=WORKDIR, check=True, capture_output=True, timeout=30)
         # push 前先 rebase 远端, 降低双端冲突概率
         pull = subprocess.run(["git", "pull", "--rebase", push_url, "main"],

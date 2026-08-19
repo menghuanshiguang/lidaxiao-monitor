@@ -69,75 +69,17 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
-      - name: Check local daemon status
-        id: local_status
-        shell: pwsh
-        env:
-          LOCAL_CLAIMED_AT: ${{ vars.LOCAL_DAEMON_CLAIMED_AT }}
-        run: |
-          $claimed = $env:LOCAL_CLAIMED_AT
-          $isClaimed = 'false'
-          Write-Output "claimed_raw=$claimed"
-          if ($claimed) {
-            try {
-              $t = [datetime]::Parse($claimed).ToUniversalTime()
-              $ageMin = ((Get-Date).ToUniversalTime() - $t).TotalMinutes
-              Write-Output "claimed_age_min=$ageMin"
-              if ($ageMin -le 30) { $isClaimed = 'true' }
-            } catch { Write-Output "claimed_parse_error" ; $isClaimed = 'false' }
-          }
-          Write-Output "local_claimed=$isClaimed"
-          "active=$isClaimed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Reset failed analysis state (retry partial/error/timeout)
-        if: steps.local_status.outputs.active != 'true'
-        run: python _setup/reset_failed_state.py
-        shell: pwsh
-
-      - name: Run monitor
-        if: steps.local_status.outputs.active != 'true'
+      - name: Run unified monitor (local/cloud adaptive)
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
         run: |
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
-          python monitor.py
-
-      - name: Publish reports to repo (docs/reports)
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # 报告从运行产物复制到 docs/reports, 保留全部日报 + latest.md
-          if (Test-Path reports) {
-            New-Item -ItemType Directory -Force docs\reports | Out-Null
-            Copy-Item reports\*.md docs\reports\ -Force
-            # latest.md 副本 (README 醒目展示用)
-            $latest = Get-ChildItem docs\reports -Filter '*.md' | Where-Object { $_.Name -ne 'latest.md' } |
-                      Sort-Object LastWriteTime -Descending | Select-Object -First 1
-            if ($latest) { Copy-Item $latest.FullName docs\reports\latest.md -Force }
-            # 生成索引页
-            $links = Get-ChildItem docs\reports -Filter '*.md' | Where-Object { $_.Name -ne 'latest.md' } |
-                     Sort-Object Name -Descending |
-                     ForEach-Object { "- [$($_.BaseName)](./$($_.Name))" }
-            Set-Content -Path docs\reports\index.md -Value ("# 📺 李大霄视频日报索引`n`n$links`n") -Encoding UTF8
-            git config user.name "lidaxiao-monitor[bot]"
-            git config user.email "actions@users.noreply.github.com"
-            git add docs/reports state
-            if (git diff --cached --quiet) {
-              Write-Host "报告无变化, 跳过提交"
-            } else {
-              git commit -m "docs: update daily reports [cloud] [skip ci]"
-              git pull --rebase origin main
-              git push origin HEAD:main
-              Write-Host "报告已提交到 docs/reports/"
-            }
-          } else {
-            Write-Host "今日无新视频, 无报告更新"
-          }
+          python lidaxiao.py --once
 
       - name: Upload reports as artifact
         uses: actions/upload-artifact@v4
