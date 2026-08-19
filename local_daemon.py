@@ -181,10 +181,19 @@ def publish_reports(args):
     if not os.path.isdir(reports_dir):
         log("没有 reports/ 目录, 跳过发布")
         return
+    baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)
+
+    def is_recent(name):
+        try:
+            d = datetime.datetime.strptime(name[:10], "%Y-%m-%d").date()
+            return d >= baseline
+        except ValueError:
+            return False
+
     daily = sorted(f for f in os.listdir(reports_dir)
-                   if f.endswith(".md") and re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f))
+                   if f.endswith(".md") and re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f) and is_recent(f))
     if not daily:
-        log("没有日报文件, 跳过发布")
+        log("没有最近(昨天以来)日报文件, 跳过发布")
         return
 
     os.makedirs(docs_dir, exist_ok=True)
