@@ -6,6 +6,11 @@ on:
     - cron: '40 6 * * *'     # 14:40
     - cron: '0 12 * * *'     # 20:00
   workflow_dispatch:        # 手动触发
+    inputs:
+      single:
+        description: '只处理最新 1 个视频(测试用)'
+        type: boolean
+        default: false
 
 concurrency:
   group: lidaxiao-monitor
@@ -82,7 +87,11 @@ jobs:
         run: |
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
-          python monitor.py
+          if ("${{ github.event.inputs.single }}" -eq "true") {
+            python monitor.py --force
+          } else {
+            python monitor.py
+          }
 
       - name: Publish reports to repo (docs/reports)
         shell: pwsh
