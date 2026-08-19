@@ -726,6 +726,9 @@ def _call_dsc(pcfg, token, system, user):
     out = (res.stdout or "").strip()
     if not out:
         raise RuntimeError("deepseek-chat-cli 返回空内容")
+    # dsc.py 超时时会输出 "(超时未获取回答)" 且退出码为 0, 必须识别为失败并继续兜底
+    if "超时未获取回答" in out or "未获取回答" in out:
+        raise RuntimeError("deepseek-chat-cli 超时未获取回答")
     return out
 
 
@@ -985,6 +988,9 @@ def process_video(cfg, api_key, video):
         try:
             log(f"AI分析中 (第{attempt}次)...")
             analysis = analyze_subtitles(cfg, api_key, video, subtitle_text, history)
+            # 防御: 任何 provider 返回超时/未获取回答都视为失败, 不写入报告
+            if "超时未获取回答" in analysis or "未获取回答" in analysis:
+                raise ValueError("LLM 返回超时未获取回答")
             analysis = ensure_disclaimer(analysis)
             break
         except Exception as e:
