@@ -171,15 +171,22 @@ def main():
     last_beat = time.time()
     try:
         while True:
-            now = datetime.datetime.now(CN_TZ)
-            nxt = next_run(now, times)
-            if now >= nxt:
-                run_slot(args)
-                continue
-            time.sleep(30)
-            if time.time() - last_beat >= HEARTBEAT_SECONDS:
-                update_local_flag(True)
-                last_beat = time.time()
+            try:
+                now = datetime.datetime.now(CN_TZ)
+                nxt = next_run(now, times)
+                if now >= nxt:
+                    run_slot(args)
+                    continue
+                time.sleep(30)
+                if time.time() - last_beat >= HEARTBEAT_SECONDS:
+                    update_local_flag(True)
+                    last_beat = time.time()
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                # 常驻化: 任何异常只记日志, 继续等待下一次触发, 不让进程退出
+                log(f"❌ 守护循环异常(已忽略, 继续运行): {e}")
+                time.sleep(30)
     except KeyboardInterrupt:
         log("收到退出信号, 标记本地停止")
     finally:
