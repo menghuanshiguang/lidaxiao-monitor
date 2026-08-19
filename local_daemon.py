@@ -223,10 +223,21 @@ def publish_reports(args):
 
 def run_slot(args):
     today = today_str()
-    log(f"[slot] 开始检查 (today={today})")
-    if cloud_report_exists(today):
-        log("✅ 云端已完成今日报告, 本地跳过")
+    yesterday = (datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    log(f"[slot] 开始检查 (yesterday={yesterday}, today={today})")
+    y_exists = cloud_report_exists(yesterday)
+    t_exists = cloud_report_exists(today)
+    if y_exists and t_exists:
+        log("✅ 云端已有昨天和今天的报告, 本地跳过")
         return
+    if y_exists:
+        log("ℹ️ 云端已有昨天报告")
+    else:
+        log("ℹ️ 云端没有昨天报告, 本地需要补")
+    if t_exists:
+        log("ℹ️ 云端已有今天报告")
+    else:
+        log("ℹ️ 云端没有今天报告, 本地需要补")
     if cloud_run_in_progress():
         log("☁️ 云端任务进行中, 本地跳过")
         return
