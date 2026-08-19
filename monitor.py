@@ -337,7 +337,7 @@ SPACE_BV_RE = re.compile(r"^\s*BV:\s*([A-Za-z0-9]+)")
 
 
 def get_space_videos(cfg, count):
-    """bilidown space -> [{bvid,title,dur_str}] 最新在前"""
+    """bilidown space -> [{bvid,title,dur_str,pubdate}] 最新在前"""
     rc, out, err = run_bilidown(cfg, ["space", cfg["uid"], str(count)], timeout=120)
     if rc != 0:
         log(f"space 命令失败 rc={rc}\nstderr: {err[-500:]}")
@@ -353,7 +353,16 @@ def get_space_videos(cfg, count):
         m2 = SPACE_BV_RE.match(line)
         if m2 and cur is not None:
             cur["bvid"] = m2.group(1)
-    return [v for v in videos if v["bvid"]]
+    result = [v for v in videos if v["bvid"]]
+    # 补 pubdate: 日期过滤需要 (bilidown space 不返回时间)
+    for v in result:
+        info = fetch_video_info(v["bvid"])
+        if info:
+            v["pubdate"] = info.get("pubdate", 0)
+            v["title"] = info.get("title", v.get("title", ""))
+        else:
+            v["pubdate"] = 0
+    return result
 
 
 # =====================================================================
@@ -1034,11 +1043,12 @@ def postprocess_analysis(analysis):
 def process_video(cfg, api_key, video):
     """处理单个视频: 下载->字幕->分析->报告; 返回 (ok, report_path, note)"""
     bvid = video["bvid"]
-    info = fetch_video_info(bvid)
-    if info:
-        video.update(info)
-    else:
-        video["pubdate"] = int(time.time())   # 兜底: 用当前时间
+    if not video.get("pubdate"):
+        info = fetch_video_info(bvid)
+        if info:
+            video.update(info)
+        else:
+            video["pubdate"] = int(time.time())   # 兜底: 用当前时间
     log(f"---- 处理视频: {video.get('title', '')} ({bvid}) ----")
 
     # 下载
