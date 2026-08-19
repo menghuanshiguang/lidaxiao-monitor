@@ -106,7 +106,7 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 ```
 
 - 每天 **北京时间 14:40 / 20:00** 自动运行(也可手动 `Run workflow`)
-- 报告自动提交到 `docs/reports/`(日报保留 30 天)+ 上传 artifact
+- 报告自动提交到 `docs/reports/`(日报全部保留)+ 上传 artifact
 - 状态与字幕通过 Actions 缓存持久化,无新视频秒退,不重复分析
 
 ---

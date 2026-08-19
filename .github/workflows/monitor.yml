@@ -76,15 +76,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # 报告从运行产物复制到 docs/reports, 保留最近30天 + latest.md
+          # 报告从运行产物复制到 docs/reports, 保留全部日报 + latest.md
           if (Test-Path reports) {
             New-Item -ItemType Directory -Force docs\reports | Out-Null
             Copy-Item reports\*.md docs\reports\ -Force
-            # 清理 30 天前的报告
-            $cut = (Get-Date).AddDays(-30)
-            Get-ChildItem docs\reports -Filter *.md | Where-Object {
-              $_.Name -match '^\d{4}-\d{2}-\d{2}\.md$' -and $_.LastWriteTime -lt $cut
-            } | Remove-Item -Force
             # latest.md 副本 (README 醒目展示用)
             $latest = Get-ChildItem docs\reports -Filter '*.md' | Where-Object { $_.Name -ne 'latest.md' } |
                       Sort-Object LastWriteTime -Descending | Select-Object -First 1
