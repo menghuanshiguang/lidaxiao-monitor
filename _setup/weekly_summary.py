@@ -50,13 +50,13 @@ def main():
 
 要求: 简体中文、条理清晰、操作建议具体可执行, 不模棱两可。结尾固定一行: 以上为李大霄个人观点提炼,不构成投资建议"""
 
-    api_key = m.load_deepseek_key()
+    api_key = m.load_llm_key()
     if not api_key:
-        print("无 DEEPSEEK_API_KEY")
+        print("无 LLM 密钥 (OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)")
         return 1
     cfg = m.load_config()
     user = "以下是本周(起始日 " + start + ")每日分析报告:\n\n" + "\n\n".join(reports)
-    print("调用 DeepSeek 生成周报...")
+    print(f"调用 {cfg['llm']['model']} 生成周报...")
     out = m.call_llm(cfg, api_key, system, user)
     if "不构成投资建议" not in out:
         out += "\n\n以上为李大霄个人观点提炼,不构成投资建议"

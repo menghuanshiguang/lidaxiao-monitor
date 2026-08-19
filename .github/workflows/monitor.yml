@@ -63,7 +63,7 @@ jobs:
 
       - name: Run monitor
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           PYTHONIOENCODING: utf-8
         run: |
           # 清理可能残留的锁

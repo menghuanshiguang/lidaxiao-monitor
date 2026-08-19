@@ -7,7 +7,7 @@
   1. 更新检测  : bilidown space 获取 UP主最新视频, 与 data/last_bvid.txt 对比
   2. 视频下载  : bilidown dl 下载 480P mp4 (失败重试1次)
   3. 字幕提取  : ffmpeg 抽帧 + RapidOCR 硬字幕识别 (自适应字幕区域 + 相邻帧去重)
-  4. AI 分析   : DeepSeek API 对字幕做"李大霄话术解码"分析
+  4. AI 分析   : OpenCode Zen Go API (deepseek-v4-flash) 对字幕做"李大霄话术解码"分析
   5. 每日报告  : reports/YYYY-MM-DD.md (当天已有报告则追加)
   6. 状态幂等  : data/last_bvid.txt + data/processed.txt + 并发锁
 
@@ -83,10 +83,12 @@ def load_config(path=None):
         "ocr_confidence": 0.5,
         "min_subtitle_chars": 30,       # 字幕文本少于该长度视为"无字幕"
         "llm": {
-            "base_url": "https://api.deepseek.com",
-            "model": "deepseek-chat",
+            "provider": "opencode-go",          # OpenCode Zen Go (https://opencode.ai/zen/go)
+            "base_url": "https://opencode.ai/zen/go/v1",
+            "model": "deepseek-v4-flash",
+            "reasoningEffort": "max",           # 推理等级: off/minimal/low/medium/high/max (deepseek-v4-flash 支持 high/max)
             "temperature": 0.3,
-            "max_tokens": 4000,
+            "max_tokens": 8000,
         },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
@@ -100,19 +102,29 @@ def load_config(path=None):
     return cfg
 
 
-def load_deepseek_key():
-    """密钥优先级: 环境变量 DEEPSEEK_API_KEY > 工作目录 .env 文件"""
-    v = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if v:
-        return v
+LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY")
+
+
+def load_llm_key():
+    """密钥优先级: 环境变量(OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY) > 工作目录 .env 文件(同序)"""
+    for name in LLM_KEY_ENVS:
+        v = os.environ.get(name, "").strip()
+        if v:
+            return v
     envf = os.path.join(WORKDIR, ".env")
     if os.path.exists(envf):
         with open(envf, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith("DEEPSEEK_API_KEY"):
-                    return line.split("=", 1)[1].strip().strip("'\"")
+                for name in LLM_KEY_ENVS:
+                    if line.startswith(name):
+                        return line.split("=", 1)[1].strip().strip("'\"")
     return ""
+
+
+def load_deepseek_key():
+    """向后兼容别名 (旧脚本/旧密钥名仍可用)"""
+    return load_llm_key()
 
 
 # =====================================================================
@@ -564,10 +576,17 @@ def call_llm(cfg, api_key, system, user):
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "temperature": cfg["llm"]["temperature"],
         "max_tokens": cfg["llm"]["max_tokens"],
         "stream": False,
     }
+    effort = (cfg["llm"].get("reasoningEffort") or "").strip()
+    if effort:
+        # 推理模型 (如 deepseek-v4-flash): OpenCode Zen Go 的 deepseek 思维格式
+        payload["thinking"] = {"type": "enabled"}
+        payload["reasoning_effort"] = effort
+        # 思维链模式不接受 temperature, 省略以免被端点拒绝
+    else:
+        payload["temperature"] = cfg["llm"]["temperature"]
     r = requests.post(url, json=payload, timeout=180, headers={
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -851,9 +870,9 @@ def main():
         cfg["uid"] = args.uid
     if args.limit:
         cfg["limit"] = args.limit
-    api_key = load_deepseek_key()
+    api_key = load_llm_key()
     if not api_key:
-        log("❌ 未找到 DEEPSEEK_API_KEY (检查 .env 或环境变量)")
+        log("❌ 未找到 LLM 密钥 (OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY, 检查 .env 或环境变量)")
         return 1
 
     lock = RunLock(os.path.join(WORKDIR, "data", "monitor.lock"))

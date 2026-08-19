@@ -23,9 +23,9 @@ def main():
     print(f"范围内 {len(videos)} 个视频", flush=True)
 
     cfg = m.load_config()
-    api_key = m.load_deepseek_key()
+    api_key = m.load_llm_key()
     if not api_key:
-        print("无 DEEPSEEK_API_KEY", file=sys.stderr)
+        print("无 LLM 密钥 (OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY)", file=sys.stderr)
         return 1
 
     lock = m.RunLock(os.path.join(m.WORKDIR, "data", "week_process.lock"))

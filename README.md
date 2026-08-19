@@ -37,7 +37,7 @@
 | 🔍 **自动检测** | ⬇️ **自动下载** | 📝 **硬字幕 OCR** |
 | 基于 bilidown CLI(内置 wbi 签名 + 412 反爬),状态文件对比,无新视频秒退 | 480P mp4 自动下载,失败自动重试;登录 cookies 解锁高清 | ffmpeg 抽帧 + RapidOCR,字幕带自动探测,去重/降噪;RTX 显卡 DirectML 加速 6-8 倍 |
 | 🤖 **AI 话术解码** | 📄 **每日日报** | ☁️ **云端全自动** |
-| DeepSeek 拆解:核心观点 / 关键数据 / **暗示提取(不是推荐=真实关注点)** / 市场定性 / 操作含义 / **观点连续性(升级/反转一眼看出)** | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要 | GitHub Actions 定时运行(每天 14:40 / 20:00),报告自动提交,电脑不用开机 |
+| AI 拆解:核心观点 / 关键数据 / **暗示提取(不是推荐=真实关注点)** / 市场定性 / 操作含义 / **观点连续性(升级/反转一眼看出)** | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要 | GitHub Actions 定时运行(每天 14:40 / 20:00),报告自动提交,电脑不用开机 |
 
 **流程示意**
 
@@ -70,8 +70,8 @@ git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ### 2️⃣ 配置密钥与登录
 
 ```bash
-# AI 分析密钥 (DeepSeek API)
-echo "DEEPSEEK_API_KEY=sk-xxxx" > .env
+# AI 分析密钥 (OpenCode Zen Go, 模型 deepseek-v4-flash)
+echo "OPENCODE_GO_API_KEY=sk-xxxx" > .env
 
 # B站扫码登录 (一次性, 解锁高清并降低风控)
 python _setup/login_wait.py     # 浏览器打开二维码, B站App扫码
@@ -94,11 +94,11 @@ python monitor.py --force      # 强制重新处理最新视频
 
 | Secret | 说明 |
 |--------|------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 |
+| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析,模型 `deepseek-v4-flash`,推理 `max`) |
 | `BILIBILI_COOKIES_B64` | B站登录 cookies(base64,由 `data/cookies.txt` 转换) |
 
 ```bash
-gh secret set DEEPSEEK_API_KEY --repo <your>/lidaxiao-monitor
+gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor
 gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 ```
 
@@ -149,7 +149,7 @@ A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · DeepSeek API(AI 分析) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(AI 分析) · GitHub Actions(定时/部署)
 
 ## ⚖️ 免责声明
 
