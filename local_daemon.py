@@ -169,6 +169,7 @@ def main():
         return 0
 
     last_beat = time.time()
+    last_logged_next = None
     try:
         while True:
             try:
@@ -176,7 +177,12 @@ def main():
                 nxt = next_run(now, times)
                 if now >= nxt:
                     run_slot(args)
+                    last_logged_next = None
                     continue
+                if nxt != last_logged_next:
+                    wait_min = (nxt - now).total_seconds() / 60.0
+                    log(f"下一次运行: {nxt.strftime('%Y-%m-%d %H:%M:%S')} (等待 {wait_min:.1f} 分钟)")
+                    last_logged_next = nxt
                 time.sleep(30)
                 if time.time() - last_beat >= HEARTBEAT_SECONDS:
                     update_local_flag(True)
