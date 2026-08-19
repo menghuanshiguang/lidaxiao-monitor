@@ -29,7 +29,10 @@ def run_once(args):
         ld.publish_reports(args, tag="cloud")
         return 0
     else:
-        ld.run_slot(args)
+        ok = ld.run_slot(args)
+        if ok is False:
+            ld.log("❌ 本地认领失败告警, 本次运行退出")
+            return 1
         return 0
 
 

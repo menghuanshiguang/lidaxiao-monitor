@@ -332,8 +332,8 @@ def run_slot(args):
     model = get_ollama_model()
     log(f"🚀 云端未处理, 本地开始运行 (Ollama {model})")
     if not set_local_claimed():
-        log("❌ 写入认领标志失败(重试后仍失败), 放弃本次运行, 避免双端冲突")
-        return
+        log("❌ 告警: 认领标志重试3次(间隔2秒)仍全部失败, 放弃本次运行并退出, 避免双端冲突")
+        return False
     try:
         sync_state_from_remote()   # 先同步云端 state, 本地受制于云端
         reset_local_state()
@@ -342,6 +342,7 @@ def run_slot(args):
     finally:
         stop_ollama_model(model)   # 提交报告后停止大模型, 释放内存
         clear_local_claimed()
+    return True
 
 
 def main():
