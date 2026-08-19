@@ -69,6 +69,18 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
+      - name: Reset failed analysis state (retry partial/error)
+        shell: pwsh
+        run: |
+          $proc = 'data\processed.txt'
+          if (Test-Path $proc) {
+            $keep = Get-Content $proc | Where-Object { $_ -notmatch '\|(partial|error)\|' }
+            Set-Content -Path $proc -Value $keep -Encoding utf8NoBOM
+          }
+          # last_bvid 指向不存在的值 -> 重新扫描最近视频; 已成功的仍在 processed 里会被跳过
+          Set-Content -Path data\last_bvid.txt -Value 'BV0reset' -NoNewline -Encoding utf8NoBOM
+          Write-Host '已重置失败分析状态: 清掉 partial/error, last_bvid=BV0reset'
+
       - name: Run monitor
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
