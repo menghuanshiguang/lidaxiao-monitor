@@ -25,21 +25,14 @@ def make_icon_image():
 
 
 def daemon_loop(times, grace_minutes, config):
-    last_beat = time.time()
-    daemon.update_local_flag(True)
-    try:
-        while not STOP.is_set():
-            now = daemon.datetime.datetime.now(daemon.CN_TZ)
-            nxt = daemon.next_run(now, times)
-            if now >= nxt:
-                daemon.run_slot(argparse.Namespace(config=config, grace_minutes=grace_minutes))
-                continue
-            time.sleep(30)
-            if time.time() - last_beat >= daemon.HEARTBEAT_SECONDS:
-                daemon.update_local_flag(True)
-                last_beat = time.time()
-    finally:
-        daemon.update_local_flag(False)
+    args = argparse.Namespace(config=config, grace_minutes=grace_minutes)
+    while not STOP.is_set():
+        now = daemon.datetime.datetime.now(daemon.CN_TZ)
+        nxt = daemon.next_run(now, times)
+        if now >= nxt:
+            daemon.run_slot(args)
+            continue
+        time.sleep(30)
 
 
 def run_once(config):
@@ -59,6 +52,7 @@ def on_open_log(icon, item):
 
 def on_exit(icon, item):
     daemon.log("托盘退出")
+    daemon.clear_local_claimed()
     STOP.set()
     icon.stop()
 
@@ -66,7 +60,7 @@ def on_exit(icon, item):
 def main():
     ap = argparse.ArgumentParser(description="本地常驻监控托盘版")
     ap.add_argument("--times", default=",".join(daemon.DEFAULT_TIMES),
-                    help="运行时间(北京时间, 逗号分隔), 默认 14:40,20:00")
+                    help="运行时间(北京时间, 逗号分隔), 默认 14:39,19:59")
     ap.add_argument("--grace-minutes", type=int, default=10, help="云端观察宽限分钟数")
     ap.add_argument("--config", default=None, help="传给 monitor.py 的配置文件")
     args = ap.parse_args()

@@ -73,21 +73,19 @@ jobs:
         id: local_status
         shell: pwsh
         env:
-          LOCAL_ACTIVE: ${{ vars.LOCAL_DAEMON_ACTIVE }}
-          LOCAL_UPDATED_AT: ${{ vars.LOCAL_DAEMON_UPDATED_AT }}
+          LOCAL_CLAIMED_AT: ${{ vars.LOCAL_DAEMON_CLAIMED_AT }}
         run: |
-          $active = $env:LOCAL_ACTIVE
-          $updated = $env:LOCAL_UPDATED_AT
-          $isActive = 'false'
-          if ($active -eq 'true' -and $updated) {
+          $claimed = $env:LOCAL_CLAIMED_AT
+          $isClaimed = 'false'
+          if ($claimed) {
             try {
-              $t = [datetime]::Parse($updated).ToUniversalTime()
+              $t = [datetime]::Parse($claimed).ToUniversalTime()
               $ageMin = ((Get-Date).ToUniversalTime() - $t).TotalMinutes
-              if ($ageMin -le 15) { $isActive = 'true' }
-            } catch { $isActive = 'false' }
+              if ($ageMin -le 30) { $isClaimed = 'true' }
+            } catch { $isClaimed = 'false' }
           }
-          Write-Output "local_active=$isActive"
-          "active=$isActive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Output "local_claimed=$isClaimed"
+          "active=$isClaimed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Reset failed analysis state (retry partial/error/timeout)
         if: steps.local_status.outputs.active != 'true'

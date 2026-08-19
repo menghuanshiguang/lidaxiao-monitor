@@ -3,14 +3,15 @@
 """本地常驻定时: 程序内循环, 按计划运行 monitor.py (本地模式 Ollama qwen2.5:7b)
 
 优先级: 本地 > 云端 Actions
-- 本地活跃时通过 GitHub repo variable 标记 (LOCAL_DAEMON_ACTIVE / LOCAL_DAEMON_UPDATED_AT)
-- 云端 Actions 检测到本地活跃且未过期 -> 跳过, 由本地处理
-- 本地检测到云端已完成今日报告/正在处理 -> 本地跳过, 避免重复
+- 本地在云端计划时间前 1 分钟运行 (默认 14:39 / 19:59)
+- 本地真正开始运行时, 先写带时间戳的认领标志 LOCAL_DAEMON_CLAIMED_AT
+- 云端看到该标志新鲜(<=30分钟) -> 跳过, 由本地处理
+- 本地运行完会清掉认领标志; 若本地崩溃, 标志会在 30 分钟后自动过期, 云端照常接管
+- 本地也检查云端今日报告/正在运行, 避免重复
 
-用法:
-  python local_daemon.py            # 前台常驻
-  python local_daemon.py --once     # 立即执行一次后退出
-  python local_daemon.py --times 14:40,20:00 --grace-minutes 10
+黑框操作:
+  R = 立即运行一次
+  Q = 退出
 """
 import argparse
 import datetime
@@ -26,10 +27,8 @@ CN_TZ = datetime.timezone(datetime.timedelta(hours=8))
 UTC = datetime.timezone.utc
 REPO = "menghuanshiguang/lidaxiao-monitor"
 WORKFLOW_PATH = ".github/workflows/monitor.yml"
-DEFAULT_TIMES = ["14:40", "20:00"]
-HEARTBEAT_SECONDS = 300          # 每 5 分钟刷新一次本地活跃标志
+DEFAULT_TIMES = ["14:39", "19:59"]   # 比云端 14:40 / 20:00 早 1 分钟
 LOG_PATH = os.path.join(WORKDIR, "data", "local_daemon.log")
-
 
 try:
     import msvcrt
@@ -81,20 +80,27 @@ def today_str():
     return datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
 
 
-def update_local_flag(active):
-    """通过 GitHub repo variable 标记本地守护是否活跃 (云端据此决定是否跳过)"""
-    val = "true" if active else "false"
+def set_local_claimed():
+    """本地开始运行时写认领标志(带时间戳), 云端据此跳过"""
     ts = datetime.datetime.now(UTC).isoformat(timespec="seconds")
     try:
-        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_ACTIVE",
-                        "--repo", REPO, "--body", val],
-                       check=True, capture_output=True, timeout=30)
-        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_UPDATED_AT",
+        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT",
                         "--repo", REPO, "--body", ts],
                        check=True, capture_output=True, timeout=30)
-        log(f"本地标志已更新: active={val} updated_at={ts}")
+        log(f"已认领本地运行: claimed_at={ts}")
     except Exception as e:
-        log(f"⚠️ 更新本地标志失败: {e}")
+        log(f"⚠️ 写入认领标志失败: {e}")
+
+
+def clear_local_claimed():
+    """本地运行完/退出时清掉认领标志"""
+    try:
+        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT",
+                        "--repo", REPO, "--body", ""],
+                       check=True, capture_output=True, timeout=30)
+        log("已清除本地认领标志")
+    except Exception as e:
+        log(f"⚠️ 清除认领标志失败: {e}")
 
 
 def cloud_report_exists(today):
@@ -154,30 +160,30 @@ def run_slot(args):
         log("☁️ 云端任务进行中, 本地跳过")
         return
     log("🚀 云端未处理, 本地开始运行 (Ollama qwen2.5:7b)")
-    run_monitor(args)
+    set_local_claimed()
+    try:
+        run_monitor(args)
+    finally:
+        clear_local_claimed()
 
 
 def main():
-    ap = argparse.ArgumentParser(description="本地常驻定时 (程序内循环, 不与云端 Actions 冲突)")
+    ap = argparse.ArgumentParser(description="本地常驻定时 (程序内循环, 本地优先)")
     ap.add_argument("--once", action="store_true", help="立即执行一次后退出")
     ap.add_argument("--times", default=",".join(DEFAULT_TIMES),
-                    help="运行时间(北京时间, 逗号分隔), 默认 14:40,20:00")
-    ap.add_argument("--grace-minutes", type=int, default=10, help="云端观察宽限分钟数")
+                    help="运行时间(北京时间, 逗号分隔), 默认 14:39,19:59 (比云端早1分钟)")
+    ap.add_argument("--grace-minutes", type=int, default=0,
+                    help="兼容参数(已不再等待, 保留无效果)")
     ap.add_argument("--config", default=None, help="传给 monitor.py 的配置文件")
     args = ap.parse_args()
 
     times = [t.strip() for t in args.times.split(",") if t.strip()]
     log(f"本地常驻启动: 计划 {times} (北京时间), 云端仓库 {REPO} (黑框内按 R 立即运行 / Q 退出)")
-    update_local_flag(True)
 
     if args.once:
-        try:
-            run_slot(args)
-        finally:
-            update_local_flag(False)
+        run_slot(args)
         return 0
 
-    last_beat = time.time()
     last_logged_next = None
     try:
         while True:
@@ -204,9 +210,6 @@ def main():
                     if key == "q":
                         log("🛑 手动退出")
                         raise KeyboardInterrupt
-                if time.time() - last_beat >= HEARTBEAT_SECONDS:
-                    update_local_flag(True)
-                    last_beat = time.time()
             except KeyboardInterrupt:
                 raise
             except Exception as e:
@@ -214,9 +217,9 @@ def main():
                 log(f"❌ 守护循环异常(已忽略, 继续运行): {e}")
                 time.sleep(30)
     except KeyboardInterrupt:
-        log("收到退出信号, 标记本地停止")
+        log("收到退出信号")
     finally:
-        update_local_flag(False)
+        clear_local_claimed()
 
 
 if __name__ == "__main__":
