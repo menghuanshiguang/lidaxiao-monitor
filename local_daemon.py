@@ -16,6 +16,8 @@
 import argparse
 import datetime
 import os
+import re
+import shutil
 import subprocess
 import sys
 import time
@@ -172,6 +174,53 @@ def run_monitor(args):
         log(f"❌ 本地 monitor 运行异常: {e}")
 
 
+def publish_reports(args):
+    """把本地生成的 reports/ 自动提交并推送到 GitHub docs/reports"""
+    reports_dir = os.path.join(WORKDIR, "reports")
+    docs_dir = os.path.join(WORKDIR, "docs", "reports")
+    if not os.path.isdir(reports_dir):
+        log("没有 reports/ 目录, 跳过发布")
+        return
+    daily = sorted(f for f in os.listdir(reports_dir)
+                   if f.endswith(".md") and re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f))
+    if not daily:
+        log("没有日报文件, 跳过发布")
+        return
+
+    os.makedirs(docs_dir, exist_ok=True)
+    for f in daily:
+        shutil.copy2(os.path.join(reports_dir, f), os.path.join(docs_dir, f))
+    # latest.md = 最新日报
+    latest = daily[-1]
+    shutil.copy2(os.path.join(docs_dir, latest), os.path.join(docs_dir, "latest.md"))
+    # 重建 index.md
+    index_daily = sorted(f for f in os.listdir(docs_dir)
+                         if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f))
+    links = "\n".join(f"- [{f[:-3]}](./{f})" for f in index_daily)
+    with open(os.path.join(docs_dir, "index.md"), "w", encoding="utf-8") as f:
+        f.write("# 📺 李大霄视频日报索引\n\n" + links + "\n")
+
+    log("复制报告到 docs/reports 完成, 准备 git 提交推送")
+    token = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                           text=True, timeout=30).stdout.strip()
+    push_url = f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
+    try:
+        subprocess.run(["git", "add", "docs/reports"], cwd=WORKDIR,
+                       check=True, capture_output=True, timeout=30)
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
+                              capture_output=True, timeout=30)
+        if diff.returncode == 0:
+            log("报告无变化, 跳过提交")
+            return
+        subprocess.run(["git", "commit", "-m", "docs: update local reports [skip ci]"],
+                       cwd=WORKDIR, check=True, capture_output=True, timeout=30)
+        subprocess.run(["git", "push", push_url, "main"],
+                       cwd=WORKDIR, check=True, capture_output=True, timeout=120)
+        log("✅ 报告已提交并推送")
+    except Exception as e:
+        log(f"⚠️ 报告发布失败: {e}")
+
+
 def run_slot(args):
     today = today_str()
     log(f"[slot] 开始检查 (today={today})")
@@ -185,6 +234,7 @@ def run_slot(args):
     set_local_claimed()
     try:
         run_monitor(args)
+        publish_reports(args)
     finally:
         clear_local_claimed()
 
