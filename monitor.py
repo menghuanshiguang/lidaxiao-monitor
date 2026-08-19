@@ -714,10 +714,13 @@ def _call_dsc(pcfg, token, system, user):
     prompt = f"{system}\n\n{user}"
     cmd = [sys.executable, os.path.abspath(dsc_py), prompt]
     log(f"调用 deepseek-chat-cli ({os.path.basename(dsc_py)})...")
+    # dsc.py 支持 DSC_TIMEOUT 环境变量控制回答等待时长
+    env = dict(os.environ)
+    env["DSC_TIMEOUT"] = str(pcfg.get("timeout", 300))
     try:
         res = subprocess.run(cmd, cwd=os.path.dirname(dsc_py), capture_output=True,
                              text=True, encoding="utf-8", errors="replace",
-                             timeout=pcfg.get("timeout", 300))
+                             timeout=pcfg.get("timeout", 300) + 60, env=env)
     except subprocess.TimeoutExpired:
         raise RuntimeError("deepseek-chat-cli 调用超时")
     if res.returncode != 0:
@@ -758,9 +761,14 @@ def call_llm(cfg, api_key, system, user):
         try:
             if provider == "deepseek-chat-cli":
                 log(f"调用 LLM {provider}...")
-                return _call_dsc(pcfg, key, system, user)
-            log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
-            return _call_llm_once(pcfg, key, system, user)
+                out = _call_dsc(pcfg, key, system, user)
+            else:
+                log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
+                out = _call_llm_once(pcfg, key, system, user)
+            # 任何 provider 返回超时/未获取回答都视为失败, 继续下一个兜底
+            if "超时未获取回答" in out or "未获取回答" in out:
+                raise RuntimeError(f"{provider} 返回超时未获取回答")
+            return out
         except Exception as e:
             last_err = f"{provider}: {e}"
             log(f"❌ LLM {provider} 失败: {e}")
