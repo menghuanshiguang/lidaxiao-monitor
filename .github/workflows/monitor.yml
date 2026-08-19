@@ -77,12 +77,14 @@ jobs:
         run: |
           $claimed = $env:LOCAL_CLAIMED_AT
           $isClaimed = 'false'
+          Write-Output "claimed_raw=$claimed"
           if ($claimed) {
             try {
               $t = [datetime]::Parse($claimed).ToUniversalTime()
               $ageMin = ((Get-Date).ToUniversalTime() - $t).TotalMinutes
+              Write-Output "claimed_age_min=$ageMin"
               if ($ageMin -le 30) { $isClaimed = 'true' }
-            } catch { $isClaimed = 'false' }
+            } catch { Write-Output "claimed_parse_error" ; $isClaimed = 'false' }
           }
           Write-Output "local_claimed=$isClaimed"
           "active=$isClaimed" | Out-File -FilePath $env:GITHUB_OUTPUT -Append

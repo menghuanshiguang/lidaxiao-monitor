@@ -83,43 +83,62 @@ def today_str():
 def set_local_claimed():
     """本地开始运行时写认领标志(带时间戳), 云端据此跳过"""
     ts = datetime.datetime.now(UTC).isoformat(timespec="seconds")
+    cmd = ["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO, "--body", ts]
+    log(f"命令: {' '.join(cmd)}")
     try:
-        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT",
-                        "--repo", REPO, "--body", ts],
-                       check=True, capture_output=True, timeout=30)
-        log(f"已认领本地运行: claimed_at={ts}")
+        r = subprocess.run(cmd, check=False, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+        if r.returncode != 0:
+            log("⚠️ 写入认领标志失败")
+        else:
+            log(f"已认领本地运行: claimed_at={ts}")
     except Exception as e:
-        log(f"⚠️ 写入认领标志失败: {e}")
+        log(f"⚠️ 写入认领标志异常: {e}")
 
 
 def clear_local_claimed():
     """本地运行完/退出时清掉认领标志"""
+    cmd = ["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO, "--body", ""]
+    log(f"命令: {' '.join(cmd)}")
     try:
-        subprocess.run(["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT",
-                        "--repo", REPO, "--body", ""],
-                       check=True, capture_output=True, timeout=30)
-        log("已清除本地认领标志")
+        r = subprocess.run(cmd, check=False, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=30)
+        log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+        if r.returncode != 0:
+            log("⚠️ 清除认领标志失败")
+        else:
+            log("已清除本地认领标志")
     except Exception as e:
-        log(f"⚠️ 清除认领标志失败: {e}")
+        log(f"⚠️ 清除认领标志异常: {e}")
 
 
 def cloud_report_exists(today):
     url = f"https://raw.githubusercontent.com/{REPO}/main/docs/reports/{today}.md"
+    log(f"检查云端报告: GET {url}")
     try:
         r = requests.get(url, timeout=15)
+        log(f"  -> HTTP {r.status_code}, bytes={len(r.content)}")
         return r.status_code == 200
     except Exception as e:
-        log(f"⚠️ 查询云端报告失败: {e}")
+        log(f"  -> 异常: {e}")
         return False
 
 
 def cloud_run_in_progress(hours=3):
+    api_url = f"https://api.github.com/repos/{REPO}/actions/runs"
+    log(f"检查云端运行: GET {api_url}?event=schedule&per_page=10")
     try:
-        r = requests.get(f"https://api.github.com/repos/{REPO}/actions/runs",
-                         params={"event": "schedule", "per_page": 10}, timeout=15)
+        r = requests.get(api_url, params={"event": "schedule", "per_page": 10}, timeout=15)
+        log(f"  -> HTTP {r.status_code}")
         r.raise_for_status()
+        data = r.json().get("workflow_runs", [])
+        log(f"  -> 返回 workflow_runs 数量={len(data)}")
         cutoff = datetime.datetime.now(UTC) - datetime.timedelta(hours=hours)
-        for run in r.json().get("workflow_runs", []):
+        for run in data:
+            log(f"  run id={run.get('id')} path={run.get('path')} status={run.get('status')} "
+                f"conclusion={run.get('conclusion')} created={run.get('created_at')}")
+        for run in data:
             if run.get("path") != WORKFLOW_PATH:
                 continue
             status = run.get("status")
@@ -130,9 +149,11 @@ def cloud_run_in_progress(hours=3):
                 except Exception:
                     created_dt = None
                 if created_dt and created_dt >= cutoff:
+                    log("  -> 判定: 云端有进行中的匹配 run")
                     return True
+        log("  -> 判定: 云端无进行中的匹配 run")
     except Exception as e:
-        log(f"⚠️ 查询云端运行状态失败: {e}")
+        log(f"  -> 异常: {e}")
     return False
 
 
@@ -145,7 +166,8 @@ def run_monitor(args):
     env["PYTHONIOENCODING"] = "utf-8"
     log("执行: " + " ".join(cmd))
     try:
-        subprocess.run(cmd, cwd=WORKDIR, env=env, check=False)
+        r = subprocess.run(cmd, cwd=WORKDIR, env=env, check=False)
+        log(f"  -> monitor 退出码={r.returncode}")
     except Exception as e:
         log(f"❌ 本地 monitor 运行异常: {e}")
 
