@@ -153,16 +153,6 @@ def run_slot(args):
     if cloud_run_in_progress():
         log("☁️ 云端任务进行中, 本地跳过")
         return
-    deadline = datetime.datetime.now(CN_TZ) + datetime.timedelta(minutes=args.grace_minutes)
-    log(f"⏳ 未发现云端处理, 等待 {args.grace_minutes} 分钟观察云端...")
-    while datetime.datetime.now(CN_TZ) < deadline:
-        time.sleep(30)
-        if cloud_report_exists(today):
-            log("✅ 等待期间云端已出报告, 本地跳过")
-            return
-        if cloud_run_in_progress():
-            log("☁️ 等待期间云端开始处理, 本地跳过")
-            return
     log("🚀 云端未处理, 本地开始运行 (Ollama qwen2.5:7b)")
     run_monitor(args)
 
