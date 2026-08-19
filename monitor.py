@@ -710,11 +710,17 @@ def _call_dsc(pcfg, token, prompt):
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(tok)
 
+    # 根因修复: 每次调用使用全新浏览器 profile, 避免连续多次后 dsc 检测退化导致超时
+    import uuid
+    profile_dir = os.path.join(WORKDIR, "data", "dsc_profiles", uuid.uuid4().hex)
+    os.makedirs(profile_dir, exist_ok=True)
+
     cmd = [sys.executable, os.path.abspath(dsc_py), prompt]
     log(f"调用 deepseek-chat-cli ({os.path.basename(dsc_py)})...")
-    # dsc.py 支持 DSC_TIMEOUT 环境变量控制回答等待时长
+    # dsc.py 支持 DSC_TIMEOUT 环境变量控制回答等待时长; DSV_EDGE_PROFILE 指定本次全新 profile
     env = dict(os.environ)
     env["DSC_TIMEOUT"] = str(pcfg.get("timeout", 300))
+    env["DSV_EDGE_PROFILE"] = profile_dir
     try:
         res = subprocess.run(cmd, cwd=os.path.dirname(dsc_py), capture_output=True,
                              text=True, encoding="utf-8", errors="replace",
