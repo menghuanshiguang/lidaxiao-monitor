@@ -17,6 +17,13 @@ import sys
 WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(WORKDIR)
 
+# Windows runner 默认 cp1252, 必须切 UTF-8 才能打印中文
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 CN_TZ = datetime.timezone(datetime.timedelta(hours=8))
 SECTION_RE = re.compile(r"^##\s*视频\d+:.*?\(?(BV\w+)\)?\s*$")
 MARKERS = ("AI分析失败", "超时未获取回答", "未获取回答")
