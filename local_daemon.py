@@ -31,6 +31,25 @@ HEARTBEAT_SECONDS = 300          # 每 5 分钟刷新一次本地活跃标志
 LOG_PATH = os.path.join(WORKDIR, "data", "local_daemon.log")
 
 
+try:
+    import msvcrt
+    HAS_MSVCRT = True
+except ImportError:
+    HAS_MSVCRT = False
+
+
+def check_key():
+    """读取控制台按键(小写); 无按键返回 None"""
+    if not HAS_MSVCRT:
+        return None
+    try:
+        if msvcrt.kbhit():
+            return msvcrt.getwch().lower()
+    except Exception:
+        pass
+    return None
+
+
 def log(msg):
     line = f"[{datetime.datetime.now(CN_TZ).strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
     print(line, flush=True)
@@ -158,7 +177,7 @@ def main():
     args = ap.parse_args()
 
     times = [t.strip() for t in args.times.split(",") if t.strip()]
-    log(f"本地常驻启动: 计划 {times} (北京时间), 云端仓库 {REPO}")
+    log(f"本地常驻启动: 计划 {times} (北京时间), 云端仓库 {REPO} (黑框内按 R 立即运行 / Q 退出)")
     update_local_flag(True)
 
     if args.once:
@@ -181,9 +200,20 @@ def main():
                     continue
                 if nxt != last_logged_next:
                     wait_min = (nxt - now).total_seconds() / 60.0
-                    log(f"下一次运行: {nxt.strftime('%Y-%m-%d %H:%M:%S')} (等待 {wait_min:.1f} 分钟)")
+                    log(f"下一次运行: {nxt.strftime('%Y-%m-%d %H:%M:%S')} (等待 {wait_min:.1f} 分钟, 按 R 立即运行 / Q 退出)")
                     last_logged_next = nxt
-                time.sleep(30)
+                # 等待 30 秒, 期间可按键: R=立即运行, Q=退出
+                for _ in range(30):
+                    time.sleep(1)
+                    key = check_key()
+                    if key == "r":
+                        log("🔄 手动触发立即运行")
+                        run_slot(args)
+                        last_logged_next = None
+                        break
+                    if key == "q":
+                        log("🛑 手动退出")
+                        raise KeyboardInterrupt
                 if time.time() - last_beat >= HEARTBEAT_SECONDS:
                     update_local_flag(True)
                     last_beat = time.time()
