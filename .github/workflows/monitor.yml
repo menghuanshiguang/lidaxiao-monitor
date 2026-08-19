@@ -40,6 +40,14 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 
+      - name: Clone deepseek-chat-cli (public)
+        run: |
+          git clone --depth 1 https://github.com/menghuanshiguang/deepseek-chat-cli.git _repo/deepseek-chat-cli
+
+      - name: Install deepseek-chat-cli deps
+        run: pip install --disable-pip-version-check -r _repo/deepseek-chat-cli/requirements.txt
+        shell: pwsh
+
       - name: Write Bilibili cookies (from secret)
         shell: pwsh
         env:
@@ -65,6 +73,7 @@ jobs:
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
           PYTHONIOENCODING: utf-8
         run: |
           # 清理可能残留的锁

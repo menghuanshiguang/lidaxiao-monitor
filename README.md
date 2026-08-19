@@ -70,8 +70,9 @@ git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ### 2️⃣ 配置密钥与登录
 
 ```bash
-# AI 分析密钥: 主用 OpenCode Zen Go (模型 deepseek-v4-flash), 失败自动兜底 DeepSeek
+# AI 分析密钥 (三级兜底: OpenCode Go -> deepseek-chat-cli -> DeepSeek 官方 API)
 echo "OPENCODE_GO_API_KEY=sk-xxxx" >> .env
+echo "DSV_TOKEN=xxxx" >> .env
 echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env
 
 # B站扫码登录 (一次性, 解锁高清并降低风控)
@@ -91,16 +92,20 @@ python monitor.py --force      # 强制重新处理最新视频
 
 ## ⏰ 自动运行(GitHub Actions)
 
-本仓库内置 CI,配置两个 Secret 后即可云端全自动:
+本仓库内置 CI,配置以下 Secret 后即可云端全自动:
 
 | Secret | 说明 |
 |--------|------|
 | `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析主通道,模型 `deepseek-v4-flash`,推理 `max`) |
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥(兜底通道,OpenCode Go 失败时自动重试;可选但推荐) |
+| `DSV_TOKEN` | DeepSeek 网页版登录 token(第二兜底 `deepseek-chat-cli` 使用) |
+| `DEEPSEEK_API_KEY` | DeepSeek 官方 API 密钥(最后兜底) |
 | `BILIBILI_COOKIES_B64` | B站登录 cookies(base64,由 `data/cookies.txt` 转换) |
+
+> `deepseek-chat-cli` 已提供公开仓库(不含 token),Actions 直接公开克隆,无需 PAT。
 
 ```bash
 gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor
+gh secret set DSV_TOKEN --repo <your>/lidaxiao-monitor
 gh secret set DEEPSEEK_API_KEY --repo <your>/lidaxiao-monitor
 gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 ```
@@ -152,7 +157,7 @@ A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(AI 分析主通道) + DeepSeek API(兜底) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底) · GitHub Actions(定时/部署)
 
 ## ⚖️ 免责声明
 

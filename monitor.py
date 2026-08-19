@@ -97,6 +97,13 @@ def load_config(path=None):
             "temperature": 0.3,
             "max_tokens": 4000,
         },
+        "llm_cli": {                            # 第二兜底: deepseek-chat-cli (DeepSeek 网页版登录 token)
+            "provider": "deepseek-chat-cli",
+            "repo": "https://github.com/menghuanshiguang/deepseek-chat-cli.git",
+            "path": "_repo/deepseek-chat-cli",
+            "token_env": "DSV_TOKEN",
+            "timeout": 300,
+        },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
     }
@@ -107,14 +114,16 @@ def load_config(path=None):
         cfg.update(user)
         cfg["llm"].update(user.get("llm", {}))
         cfg["llm_fallback"].update(user.get("llm_fallback", {}))
+        cfg["llm_cli"].update(user.get("llm_cli", {}))
     return cfg
 
 
 LLM_PROVIDER_KEY_ENVS = {
     "opencode-go": ("OPENCODE_GO_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
+    "deepseek-chat-cli": ("DSV_TOKEN", "DEEPSEEK_CHAT_CLI_TOKEN"),
 }
-LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY")
+LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
 
 
 def _env_or_envfile(name):
@@ -617,9 +626,119 @@ def _call_llm_once(pcfg, api_key, system, user):
     return j["choices"][0]["message"]["content"].strip()
 
 
+def _find_dsc_path(pcfg):
+    """定位 deepseek-chat-cli 的 dsc.py"""
+    rel = pcfg.get("path", "_repo/deepseek-chat-cli")
+    cands = []
+    if os.path.isabs(rel):
+        cands.append(rel)
+    else:
+        cands.append(os.path.join(WORKDIR, rel))
+    for extra in ("_repo/deepseek-chat-cli", "tools/deepseek-chat-cli", "deepseek-chat-cli"):
+        cands.append(os.path.join(WORKDIR, extra))
+    for d in cands:
+        f = os.path.join(d, "dsc.py")
+        if os.path.isfile(f):
+            return f
+    return None
+
+
+def _repo_slug(repo):
+    s = repo.rstrip("/").removesuffix(".git")
+    parts = s.split("/")
+    return "/".join(parts[-2:])
+
+
+def _clone_dsc(pcfg):
+    """克隆 deepseek-chat-cli (私有仓库, 优先 gh 认证, 其次 git + token)"""
+    repo = pcfg.get("repo", "https://github.com/menghuanshiguang/deepseek-chat-cli.git")
+    rel = pcfg.get("path", "_repo/deepseek-chat-cli")
+    dest = rel if os.path.isabs(rel) else os.path.join(WORKDIR, rel)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    # 1) gh repo clone (本地已 gh 登录时最稳)
+    try:
+        subprocess.run(["gh", "repo", "clone", _repo_slug(repo), dest],
+                       check=True, capture_output=True, timeout=180)
+        return True
+    except Exception as e:
+        log(f"⚠️ gh clone 失败: {e}")
+    # 2) git clone + token
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+    if not token:
+        try:
+            token = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                                   text=True, timeout=30).stdout.strip()
+        except Exception:
+            token = ""
+    try:
+        if token:
+            auth_url = repo.replace("https://", f"https://oauth2:{token}@")
+            subprocess.run(["git", "clone", "--depth", "1", auth_url, dest],
+                           check=True, capture_output=True, timeout=180)
+        else:
+            subprocess.run(["git", "clone", "--depth", "1", repo, dest],
+                           check=True, capture_output=True, timeout=180)
+        return True
+    except Exception as e:
+        log(f"⚠️ git clone 失败: {e}")
+    return False
+
+
+def _call_dsc(pcfg, token, system, user):
+    """调用 deepseek-chat-cli (dsc.py): 网页版登录 token 走浏览器对话"""
+    dsc_py = _find_dsc_path(pcfg)
+    if not dsc_py:
+        log("⏬ deepseek-chat-cli 未找到, 尝试克隆...")
+        if not _clone_dsc(pcfg):
+            raise RuntimeError("deepseek-chat-cli 克隆失败")
+        dsc_py = _find_dsc_path(pcfg)
+        if not dsc_py:
+            raise RuntimeError("克隆后仍未找到 dsc.py")
+
+    tok = (token or "").strip().lstrip("\ufeff")
+    if not tok:
+        # 兜底: 直接读仓库自带的 .dsv_token
+        repo_tok = os.path.join(os.path.dirname(dsc_py), ".dsv_token")
+        if os.path.exists(repo_tok):
+            with open(repo_tok, "r", encoding="utf-8-sig") as f:
+                tok = f.read().strip()
+    if not tok:
+        raise RuntimeError("deepseek-chat-cli: 未找到 DSV_TOKEN")
+
+    # dsc.py 固定读 ~/.dsv_token, 把系统变量写进去
+    token_path = os.path.expanduser("~/.dsv_token")
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(tok)
+
+    # dsc 是纯用户对话 CLI, 把 system+user 合并成一条提示词
+    prompt = f"{system}\n\n{user}"
+    cmd = [sys.executable, os.path.abspath(dsc_py), prompt]
+    log(f"调用 deepseek-chat-cli ({os.path.basename(dsc_py)})...")
+    try:
+        res = subprocess.run(cmd, cwd=os.path.dirname(dsc_py), capture_output=True,
+                             text=True, encoding="utf-8", errors="replace",
+                             timeout=pcfg.get("timeout", 300))
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("deepseek-chat-cli 调用超时")
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"deepseek-chat-cli 失败 exit={res.returncode}: {(res.stderr or res.stdout)[-500:]}")
+    out = (res.stdout or "").strip()
+    if not out:
+        raise RuntimeError("deepseek-chat-cli 返回空内容")
+    return out
+
+
 def call_llm(cfg, api_key, system, user):
-    """按顺序尝试 LLM provider: 主 opencode-go, 失败后自动切 llm_fallback (deepseek)"""
+    """按顺序尝试 LLM provider:
+    1) opencode-go (主)
+    2) deepseek-chat-cli (DeepSeek 网页版, 第二兜底)
+    3) llm_fallback = deepseek 官方 API (最后兜底)
+    """
     providers = [cfg.get("llm")]
+    cli = cfg.get("llm_cli")
+    if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
+        providers.append(cli)
     fallback = cfg.get("llm_fallback")
     if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
         providers.append(fallback)
@@ -630,10 +749,13 @@ def call_llm(cfg, api_key, system, user):
         provider = pcfg.get("provider", "opencode-go")
         key = load_llm_key(provider) or api_key
         if not key:
-            last_err = f"{provider}: 未找到 API key"
+            last_err = f"{provider}: 未找到 API key/token"
             log(f"⚠️ LLM {provider}: {last_err}, 跳过")
             continue
         try:
+            if provider == "deepseek-chat-cli":
+                log(f"调用 LLM {provider}...")
+                return _call_dsc(pcfg, key, system, user)
             log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
             return _call_llm_once(pcfg, key, system, user)
         except Exception as e:

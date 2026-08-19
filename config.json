@@ -14,6 +14,13 @@
     "temperature": 0.3,
     "max_tokens": 8000
   },
+  "llm_cli": {
+    "provider": "deepseek-chat-cli",
+    "repo": "https://github.com/menghuanshiguang/deepseek-chat-cli.git",
+    "path": "_repo/deepseek-chat-cli",
+    "token_env": "DSV_TOKEN",
+    "timeout": 300
+  },
   "llm_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",
