@@ -84,20 +84,24 @@ def today_str():
 
 
 def set_local_claimed():
-    """本地开始运行时写认领标志(带时间戳), 云端据此跳过"""
+    """本地开始运行时写认领标志(带时间戳), 云端据此跳过; 重试3次, 失败返回 False"""
     ts = datetime.datetime.now(UTC).isoformat(timespec="seconds")
     cmd = ["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO, "--body", ts]
-    log(f"命令: {' '.join(cmd)}")
-    try:
-        r = subprocess.run(cmd, check=False, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=30)
-        log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
-        if r.returncode != 0:
-            log("⚠️ 写入认领标志失败")
-        else:
-            log(f"已认领本地运行: claimed_at={ts}")
-    except Exception as e:
-        log(f"⚠️ 写入认领标志异常: {e}")
+    for attempt in range(1, 4):
+        log(f"命令(第{attempt}次): {' '.join(cmd)}")
+        try:
+            r = subprocess.run(cmd, check=False, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=30)
+            log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+            if r.returncode == 0:
+                log(f"已认领本地运行: claimed_at={ts}")
+                return True
+            log(f"⚠️ 写入认领标志失败(第{attempt}次)")
+        except Exception as e:
+            log(f"⚠️ 写入认领标志异常(第{attempt}次): {e}")
+        if attempt < 3:
+            time.sleep(2)
+    return False
 
 
 def clear_local_claimed():
@@ -222,8 +226,13 @@ def publish_reports(args):
         if diff.returncode == 0:
             log("报告无变化, 跳过提交")
             return
-        subprocess.run(["git", "commit", "-m", "docs: update local reports [skip ci]"],
+        subprocess.run(["git", "commit", "-m", "docs: update local reports [local] [skip ci]"],
                        cwd=WORKDIR, check=True, capture_output=True, timeout=30)
+        # push 前先 rebase 远端, 降低双端冲突概率
+        pull = subprocess.run(["git", "pull", "--rebase", push_url, "main"],
+                              cwd=WORKDIR, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60)
+        log(f"push 前 rebase: 返回码={pull.returncode} stdout={pull.stdout.strip()!r} stderr={pull.stderr.strip()!r}")
         subprocess.run(["git", "push", push_url, "main"],
                        cwd=WORKDIR, check=True, capture_output=True, timeout=120)
         log("✅ 报告已提交并推送")
@@ -293,7 +302,9 @@ def run_slot(args):
         return
     model = get_ollama_model()
     log(f"🚀 云端未处理, 本地开始运行 (Ollama {model})")
-    set_local_claimed()
+    if not set_local_claimed():
+        log("❌ 写入认领标志失败(重试后仍失败), 放弃本次运行, 避免双端冲突")
+        return
     try:
         sync_state_from_remote()   # 先同步云端 state, 本地受制于云端
         reset_local_state()
