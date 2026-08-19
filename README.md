@@ -70,8 +70,9 @@ git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ### 2️⃣ 配置密钥与登录
 
 ```bash
-# AI 分析密钥 (OpenCode Zen Go, 模型 deepseek-v4-flash)
-echo "OPENCODE_GO_API_KEY=sk-xxxx" > .env
+# AI 分析密钥: 主用 OpenCode Zen Go (模型 deepseek-v4-flash), 失败自动兜底 DeepSeek
+echo "OPENCODE_GO_API_KEY=sk-xxxx" >> .env
+echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env
 
 # B站扫码登录 (一次性, 解锁高清并降低风控)
 python _setup/login_wait.py     # 浏览器打开二维码, B站App扫码
@@ -94,11 +95,13 @@ python monitor.py --force      # 强制重新处理最新视频
 
 | Secret | 说明 |
 |--------|------|
-| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析,模型 `deepseek-v4-flash`,推理 `max`) |
+| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析主通道,模型 `deepseek-v4-flash`,推理 `max`) |
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥(兜底通道,OpenCode Go 失败时自动重试;可选但推荐) |
 | `BILIBILI_COOKIES_B64` | B站登录 cookies(base64,由 `data/cookies.txt` 转换) |
 
 ```bash
 gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor
+gh secret set DEEPSEEK_API_KEY --repo <your>/lidaxiao-monitor
 gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 ```
 
@@ -149,7 +152,7 @@ A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(AI 分析) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(AI 分析主通道) + DeepSeek API(兜底) · GitHub Actions(定时/部署)
 
 ## ⚖️ 免责声明
 

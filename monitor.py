@@ -90,6 +90,13 @@ def load_config(path=None):
             "temperature": 0.3,
             "max_tokens": 8000,
         },
+        "llm_fallback": {                       # OpenCode Go 失败时的 DeepSeek 兜底
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-chat",
+            "temperature": 0.3,
+            "max_tokens": 4000,
+        },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
     }
@@ -99,26 +106,39 @@ def load_config(path=None):
             user = json.load(f)
         cfg.update(user)
         cfg["llm"].update(user.get("llm", {}))
+        cfg["llm_fallback"].update(user.get("llm_fallback", {}))
     return cfg
 
 
+LLM_PROVIDER_KEY_ENVS = {
+    "opencode-go": ("OPENCODE_GO_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+}
 LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY")
 
 
-def load_llm_key():
-    """密钥优先级: 环境变量(OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY) > 工作目录 .env 文件(同序)"""
-    for name in LLM_KEY_ENVS:
-        v = os.environ.get(name, "").strip()
-        if v:
-            return v
+def _env_or_envfile(name):
+    """从环境变量或工作目录 .env 文件读取单个密钥"""
+    v = os.environ.get(name, "").strip()
+    if v:
+        return v
     envf = os.path.join(WORKDIR, ".env")
     if os.path.exists(envf):
         with open(envf, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                for name in LLM_KEY_ENVS:
-                    if line.startswith(name):
-                        return line.split("=", 1)[1].strip().strip("'\"")
+                if line.startswith(name):
+                    return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
+
+
+def load_llm_key(provider=None):
+    """密钥优先级: 环境变量 > .env 文件; provider=None 时按 OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY 顺序"""
+    names = LLM_PROVIDER_KEY_ENVS.get(provider, LLM_KEY_ENVS) if provider else LLM_KEY_ENVS
+    for name in names:
+        v = _env_or_envfile(name)
+        if v:
+            return v
     return ""
 
 
@@ -567,26 +587,27 @@ def merge_ts_lines(a, b):
 # =====================================================================
 # 4. AI 分析
 # =====================================================================
-def call_llm(cfg, api_key, system, user):
+def _call_llm_once(pcfg, api_key, system, user):
+    """向单个 LLM provider 发起一次 Chat Completions 请求"""
     import requests
-    url = cfg["llm"]["base_url"].rstrip("/") + "/chat/completions"
+    url = pcfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
-        "model": cfg["llm"]["model"],
+        "model": pcfg["model"],
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_tokens": cfg["llm"]["max_tokens"],
+        "max_tokens": pcfg.get("max_tokens", 4000),
         "stream": False,
     }
-    effort = (cfg["llm"].get("reasoningEffort") or "").strip()
+    effort = (pcfg.get("reasoningEffort") or "").strip()
     if effort:
         # 推理模型 (如 deepseek-v4-flash): OpenCode Zen Go 的 deepseek 思维格式
         payload["thinking"] = {"type": "enabled"}
         payload["reasoning_effort"] = effort
         # 思维链模式不接受 temperature, 省略以免被端点拒绝
     else:
-        payload["temperature"] = cfg["llm"]["temperature"]
+        payload["temperature"] = pcfg.get("temperature", 0.3)
     r = requests.post(url, json=payload, timeout=180, headers={
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -594,6 +615,31 @@ def call_llm(cfg, api_key, system, user):
     r.raise_for_status()
     j = r.json()
     return j["choices"][0]["message"]["content"].strip()
+
+
+def call_llm(cfg, api_key, system, user):
+    """按顺序尝试 LLM provider: 主 opencode-go, 失败后自动切 llm_fallback (deepseek)"""
+    providers = [cfg.get("llm")]
+    fallback = cfg.get("llm_fallback")
+    if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
+        providers.append(fallback)
+    last_err = ""
+    for pcfg in providers:
+        if not pcfg:
+            continue
+        provider = pcfg.get("provider", "opencode-go")
+        key = load_llm_key(provider) or api_key
+        if not key:
+            last_err = f"{provider}: 未找到 API key"
+            log(f"⚠️ LLM {provider}: {last_err}, 跳过")
+            continue
+        try:
+            log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
+            return _call_llm_once(pcfg, key, system, user)
+        except Exception as e:
+            last_err = f"{provider}: {e}"
+            log(f"❌ LLM {provider} 失败: {e}")
+    raise RuntimeError(last_err or "没有可用的 LLM provider")
 
 
 def load_history(cfg, days=5):

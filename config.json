@@ -13,5 +13,12 @@
     "reasoningEffort": "max",
     "temperature": 0.3,
     "max_tokens": 8000
+  },
+  "llm_fallback": {
+    "provider": "deepseek",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-chat",
+    "temperature": 0.3,
+    "max_tokens": 4000
   }
 }
