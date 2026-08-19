@@ -21,6 +21,13 @@
     "token_env": "DSV_TOKEN",
     "timeout": 300
   },
+  "llm_ollama": {
+    "provider": "ollama",
+    "base_url": "http://localhost:11434/v1",
+    "model": "qwen2.5:7b",
+    "temperature": 0.3,
+    "max_tokens": 8000
+  },
   "llm_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",

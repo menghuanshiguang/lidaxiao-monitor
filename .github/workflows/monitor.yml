@@ -69,11 +69,33 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
+      - name: Check local daemon status
+        id: local_status
+        shell: pwsh
+        env:
+          LOCAL_ACTIVE: ${{ vars.LOCAL_DAEMON_ACTIVE }}
+          LOCAL_UPDATED_AT: ${{ vars.LOCAL_DAEMON_UPDATED_AT }}
+        run: |
+          $active = $env:LOCAL_ACTIVE
+          $updated = $env:LOCAL_UPDATED_AT
+          $isActive = 'false'
+          if ($active -eq 'true' -and $updated) {
+            try {
+              $t = [datetime]::Parse($updated).ToUniversalTime()
+              $ageMin = ((Get-Date).ToUniversalTime() - $t).TotalMinutes
+              if ($ageMin -le 15) { $isActive = 'true' }
+            } catch { $isActive = 'false' }
+          }
+          Write-Output "local_active=$isActive"
+          "active=$isActive" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Reset failed analysis state (retry partial/error/timeout)
+        if: steps.local_status.outputs.active != 'true'
         run: python _setup/reset_failed_state.py
         shell: pwsh
 
       - name: Run monitor
+        if: steps.local_status.outputs.active != 'true'
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

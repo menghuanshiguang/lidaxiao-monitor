@@ -104,6 +104,13 @@ def load_config(path=None):
             "token_env": "DSV_TOKEN",
             "timeout": 300,
         },
+        "llm_ollama": {                         # 本地模式: Ollama qwen2.5:7b (无 key)
+            "provider": "ollama",
+            "base_url": "http://localhost:11434/v1",
+            "model": "qwen2.5:7b",
+            "temperature": 0.3,
+            "max_tokens": 8000,
+        },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
     }
@@ -115,6 +122,11 @@ def load_config(path=None):
         cfg["llm"].update(user.get("llm", {}))
         cfg["llm_fallback"].update(user.get("llm_fallback", {}))
         cfg["llm_cli"].update(user.get("llm_cli", {}))
+        cfg["llm_ollama"].update(user.get("llm_ollama", {}))
+    # 本地模式开关: 环境变量 LIDAXIAO_LOCAL=1 或 config.json local_ollama=true
+    cfg["local_ollama"] = bool(user.get("local_ollama", False)) if os.path.exists(p) else False
+    if os.environ.get("LIDAXIAO_LOCAL") == "1":
+        cfg["local_ollama"] = True
     return cfg
 
 
@@ -617,10 +629,10 @@ def _call_llm_once(pcfg, api_key, system, user):
         # 思维链模式不接受 temperature, 省略以免被端点拒绝
     else:
         payload["temperature"] = pcfg.get("temperature", 0.3)
-    r = requests.post(url, json=payload, timeout=180, headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    })
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    r = requests.post(url, json=payload, timeout=180, headers=headers)
     r.raise_for_status()
     j = r.json()
     return j["choices"][0]["message"]["content"].strip()
@@ -740,25 +752,25 @@ def _call_dsc(pcfg, token, prompt):
 
 
 def call_llm(cfg, api_key, system, user, dsc_prompt=None):
-    """按顺序尝试 LLM provider:
-    1) opencode-go (主)
-    2) deepseek-chat-cli (DeepSeek 网页版, 第二兜底)
-    3) llm_fallback = deepseek 官方 API (最后兜底)
-    """
-    providers = [cfg.get("llm")]
-    cli = cfg.get("llm_cli")
-    if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
-        providers.append(cli)
-    fallback = cfg.get("llm_fallback")
-    if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
-        providers.append(fallback)
+    """按顺序尝试 LLM provider; 本地模式(cfg.local_ollama)只走 Ollama qwen2.5:7b"""
+    if cfg.get("local_ollama"):
+        providers = [cfg.get("llm_ollama")]
+    else:
+        providers = [cfg.get("llm")]
+        cli = cfg.get("llm_cli")
+        if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
+            providers.append(cli)
+        fallback = cfg.get("llm_fallback")
+        if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
+            providers.append(fallback)
+    NO_KEY_PROVIDERS = {"ollama"}
     last_err = ""
     for pcfg in providers:
         if not pcfg:
             continue
         provider = pcfg.get("provider", "opencode-go")
         key = load_llm_key(provider) or api_key
-        if not key:
+        if not key and provider not in NO_KEY_PROVIDERS:
             last_err = f"{provider}: 未找到 API key/token"
             log(f"⚠️ LLM {provider}: {last_err}, 跳过")
             continue
