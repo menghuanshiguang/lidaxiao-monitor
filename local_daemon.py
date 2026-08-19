@@ -230,6 +230,16 @@ def publish_reports(args):
         log(f"⚠️ 报告发布失败: {e}")
 
 
+def reset_local_state():
+    """运行前把 last_bvid 置为哨兵, 让 monitor 按'昨天以来+未处理'重新扫描, 避免被旧 last_bvid 卡住"""
+    try:
+        with open(os.path.join(WORKDIR, "data", "last_bvid.txt"), "w", encoding="utf-8") as f:
+            f.write("BV0reset")
+        log("已重置 last_bvid=BV0reset (重新扫描昨天以来未处理视频)")
+    except Exception as e:
+        log(f"⚠️ 重置 last_bvid 失败: {e}")
+
+
 def run_slot(args):
     today = today_str()
     yesterday = (datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
@@ -253,6 +263,7 @@ def run_slot(args):
     log("🚀 云端未处理, 本地开始运行 (Ollama qwen2.5:7b)")
     set_local_claimed()
     try:
+        reset_local_state()
         run_monitor(args)
         publish_reports(args)
     finally:
