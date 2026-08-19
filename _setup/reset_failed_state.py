@@ -73,10 +73,10 @@ def recent_bvids(days=1):
 
 def main():
     failed = extract_failed_bvids()
-    recent = recent_bvids(1)
+    recent = recent_bvids(2)
     targets = failed | recent
     print(f"失败/超时 BV: {len(failed)} -> {sorted(failed)}")
-    print(f"昨天以来 BV: {len(recent)} -> {sorted(recent)}")
+    print(f"前天以来 BV: {len(recent)} -> {sorted(recent)}")
     print(f"待清理 BV 总数: {len(targets)}")
 
     os.makedirs("state", exist_ok=True)

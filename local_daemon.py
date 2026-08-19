@@ -181,7 +181,7 @@ def publish_reports(args):
     if not os.path.isdir(reports_dir):
         log("没有 reports/ 目录, 跳过发布")
         return
-    baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)
+    baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=2)
 
     def is_recent(name):
         try:
@@ -254,21 +254,15 @@ def reset_local_state():
 
 def run_slot(args):
     today = today_str()
-    yesterday = (datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    log(f"[slot] 开始检查 (yesterday={yesterday}, today={today})")
-    y_exists = cloud_report_exists(yesterday)
-    t_exists = cloud_report_exists(today)
-    if y_exists and t_exists:
-        log("✅ 云端已有昨天和今天的报告, 本地跳过")
+    now_date = datetime.datetime.now(CN_TZ).date()
+    dates = [(now_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d") for i in range(3)]  # 前天,昨天,今天
+    log(f"[slot] 开始检查 (baseline={dates[0]}, dates={dates})")
+    exists = {d: cloud_report_exists(d) for d in dates}
+    if all(exists.values()):
+        log("✅ 云端已有前天/昨天/今天的报告, 本地跳过")
         return
-    if y_exists:
-        log("ℹ️ 云端已有昨天报告")
-    else:
-        log("ℹ️ 云端没有昨天报告, 本地需要补")
-    if t_exists:
-        log("ℹ️ 云端已有今天报告")
-    else:
-        log("ℹ️ 云端没有今天报告, 本地需要补")
+    for d in dates:
+        log(f"ℹ️ 云端{'已有' if exists[d] else '没有'} {d} 报告")
     if cloud_run_in_progress():
         log("☁️ 云端任务进行中, 本地跳过")
         return
