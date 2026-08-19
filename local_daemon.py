@@ -100,19 +100,19 @@ def set_local_claimed():
 
 
 def clear_local_claimed():
-    """本地运行完/退出时清掉认领标志"""
-    cmd = ["gh", "variable", "set", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO, "--body", ""]
+    """本地运行完/退出时删除认领标志 (变量删除比空值更稳)"""
+    cmd = ["gh", "variable", "delete", "LOCAL_DAEMON_CLAIMED_AT", "--repo", REPO]
     log(f"命令: {' '.join(cmd)}")
     try:
         r = subprocess.run(cmd, check=False, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=30)
         log(f"返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
         if r.returncode != 0:
-            log("⚠️ 清除认领标志失败")
+            log("⚠️ 删除认领标志失败(可能不存在, 可忽略)")
         else:
             log("已清除本地认领标志")
     except Exception as e:
-        log(f"⚠️ 清除认领标志异常: {e}")
+        log(f"⚠️ 删除认领标志异常: {e}")
 
 
 def cloud_report_exists(today):
