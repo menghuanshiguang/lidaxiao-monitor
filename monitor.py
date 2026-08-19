@@ -208,6 +208,14 @@ def read_state_lines(path):
 
 
 # ---------------- 并发锁 ----------------
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 class RunLock:
     def __init__(self, path):
         self.path = path
@@ -221,6 +229,22 @@ class RunLock:
                 os.write(self.fd, f"pid={os.getpid()} start={time.time()}".encode())
                 return True
             except FileExistsError:
+                # 先看锁里记录的 PID 是否还活着: 死了就是残留锁, 直接接管
+                try:
+                    with open(self.path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    m = re.search(r"pid=(\d+)", content)
+                    if m:
+                        pid = int(m.group(1))
+                        if not _pid_alive(pid):
+                            log(f"检测到死进程锁(pid={pid}), 强制接管")
+                            try:
+                                os.remove(self.path)
+                            except OSError:
+                                pass
+                            continue
+                except Exception:
+                    pass
                 try:
                     age = time.time() - os.path.getmtime(self.path)
                 except OSError:
