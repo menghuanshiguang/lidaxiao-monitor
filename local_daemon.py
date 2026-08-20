@@ -31,6 +31,7 @@ UTC = datetime.timezone.utc
 REPO = "menghuanshiguang/lidaxiao-monitor"
 WORKFLOW_PATH = ".github/workflows/monitor.yml"
 DEFAULT_TIMES = ["14:39", "19:59"]   # 比云端 14:40 / 20:00 早 1 分钟
+SLOT_GRACE_MINUTES = 60              # 错过 slot 后 60 分钟内仍补跑, 避免醒来晚几秒漏触发
 LOG_PATH = os.path.join(WORKDIR, "data", "local_daemon.log")
 
 try:
@@ -68,15 +69,29 @@ def parse_hhmm(s):
     return int(h), int(m)
 
 
-def next_run(now, times):
-    today_times = [now.replace(hour=parse_hhmm(t)[0], minute=parse_hhmm(t)[1],
-                               second=0, microsecond=0) for t in times]
-    for t in sorted(today_times):
+def slot_times(now, times):
+    return sorted(now.replace(hour=parse_hhmm(t)[0], minute=parse_hhmm(t)[1],
+                              second=0, microsecond=0) for t in times)
+
+
+def next_future_slot(now, times):
+    """严格未来下一次运行时间(用于日志)"""
+    for t in slot_times(now, times):
         if now < t:
             return t
     h, m = parse_hhmm(times[0])
     tomorrow = now + datetime.timedelta(days=1)
     return tomorrow.replace(hour=h, minute=m, second=0, microsecond=0)
+
+
+def find_due_slot(now, times, last_run_slot):
+    """找当前应触发的 slot: 时间已到且在宽限期内, 且不是已经跑过的 slot"""
+    for t in slot_times(now, times):
+        if last_run_slot and t <= last_run_slot:
+            continue
+        if t <= now <= t + datetime.timedelta(minutes=SLOT_GRACE_MINUTES):
+            return t
+    return None
 
 
 def today_str():
@@ -363,15 +378,19 @@ def main():
         return 0
 
     last_logged_next = None
+    last_run_slot = None
     try:
         while True:
             try:
                 now = datetime.datetime.now(CN_TZ)
-                nxt = next_run(now, times)
-                if now >= nxt:
+                due = find_due_slot(now, times, last_run_slot)
+                if due is not None:
+                    log(f"⏰ 到点触发: {due.strftime('%Y-%m-%d %H:%M:%S')}")
                     run_slot(args)
+                    last_run_slot = due
                     last_logged_next = None
                     continue
+                nxt = next_future_slot(now, times)
                 if nxt != last_logged_next:
                     wait_min = (nxt - now).total_seconds() / 60.0
                     log(f"下一次运行: {nxt.strftime('%Y-%m-%d %H:%M:%S')} (等待 {wait_min:.1f} 分钟, 按 R 立即运行 / Q 退出)")
