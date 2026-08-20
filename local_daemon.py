@@ -40,6 +40,12 @@ try:
 except ImportError:
     HAS_MSVCRT = False
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 
 def check_key():
     """读取控制台按键(小写); 无按键返回 None"""
@@ -172,9 +178,9 @@ def cloud_report_exists(today):
 
 def cloud_run_in_progress(hours=3):
     api_url = f"https://api.github.com/repos/{REPO}/actions/runs"
-    log(f"检查云端运行: GET {api_url}?event=schedule&per_page=10")
+    log(f"检查云端运行: GET {api_url}?per_page=20")
     try:
-        r = requests.get(api_url, params={"event": "schedule", "per_page": 10}, timeout=15)
+        r = requests.get(api_url, params={"per_page": 20}, timeout=15)
         log(f"  -> HTTP {r.status_code}")
         r.raise_for_status()
         data = r.json().get("workflow_runs", [])
@@ -218,6 +224,62 @@ def run_monitor(args, local=True):
         log(f"❌ 本地 monitor 运行异常: {e}")
 
 
+def _ensure_git_user():
+    subprocess.run(["git", "config", "user.name", "lidaxiao-monitor[bot]"],
+                   cwd=WORKDIR, capture_output=True, timeout=15)
+    subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"],
+                   cwd=WORKDIR, capture_output=True, timeout=15)
+
+
+def _push_url():
+    token = subprocess.run(["gh", "auth", "token"], capture_output=True,
+                           text=True, timeout=30).stdout.strip()
+    return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
+
+
+def _pull_rebase(push_url):
+    """push 前 rebase; 失败自动 abort, 避免仓库卡在 rebase 状态"""
+    r = subprocess.run(["git", "pull", "--rebase", push_url, "main"],
+                       cwd=WORKDIR, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+    log(f"push 前 rebase: 返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+    if r.returncode != 0:
+        log("⚠️ rebase 失败, 执行 rebase --abort 恢复")
+        subprocess.run(["git", "rebase", "--abort"], cwd=WORKDIR,
+                       capture_output=True, timeout=30)
+        return False
+    return True
+
+
+def _push():
+    """提交后执行 rebase+push, 成功返回 True"""
+    push_url = _push_url()
+    if not _pull_rebase(push_url):
+        return False
+    subprocess.run(["git", "push", push_url, "main"],
+                   cwd=WORKDIR, check=True, capture_output=True, timeout=120)
+    return True
+
+
+def commit_state(args, tag="local"):
+    """没有日报时也把 state 改动提交推送, 避免本地脏状态挡住下次 pull"""
+    try:
+        subprocess.run(["git", "add", "state"], cwd=WORKDIR, check=True,
+                       capture_output=True, timeout=30)
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
+                              capture_output=True, timeout=30)
+        if diff.returncode == 0:
+            log("state 无变化, 跳过提交")
+            return
+        _ensure_git_user()
+        subprocess.run(["git", "commit", "-m", f"chore: update state [{tag}] [skip ci]"],
+                       cwd=WORKDIR, check=True, capture_output=True, timeout=30)
+        if _push():
+            log("✅ state 已提交并推送")
+    except Exception as e:
+        log(f"⚠️ state 提交失败: {e}")
+
+
 def publish_reports(args, tag="local"):
     """把生成的 reports/ 自动提交并推送到 GitHub docs/reports; tag 标识 local/cloud"""
     reports_dir = os.path.join(WORKDIR, "reports")
@@ -254,17 +316,11 @@ def publish_reports(args, tag="local"):
         f.write("# 📺 李大霄视频日报索引\n\n" + links + "\n")
 
     log("复制报告到 docs/reports 完成, 准备 git 提交推送")
-    token = subprocess.run(["gh", "auth", "token"], capture_output=True,
-                           text=True, timeout=30).stdout.strip()
-    push_url = f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
     try:
         subprocess.run(["git", "add", "docs/reports", "state"], cwd=WORKDIR,
                        check=True, capture_output=True, timeout=30)
         # 云端 Actions 没有全局 git user, 统一设置(本地也无害)
-        subprocess.run(["git", "config", "user.name", "lidaxiao-monitor[bot]"],
-                       cwd=WORKDIR, capture_output=True, timeout=15)
-        subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"],
-                       cwd=WORKDIR, capture_output=True, timeout=15)
+        _ensure_git_user()
         diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
                               capture_output=True, timeout=30)
         if diff.returncode == 0:
@@ -272,14 +328,8 @@ def publish_reports(args, tag="local"):
             return
         subprocess.run(["git", "commit", "-m", f"docs: update reports [{tag}] [skip ci]"],
                        cwd=WORKDIR, check=True, capture_output=True, timeout=30)
-        # push 前先 rebase 远端, 降低双端冲突概率
-        pull = subprocess.run(["git", "pull", "--rebase", push_url, "main"],
-                              cwd=WORKDIR, capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60)
-        log(f"push 前 rebase: 返回码={pull.returncode} stdout={pull.stdout.strip()!r} stderr={pull.stderr.strip()!r}")
-        subprocess.run(["git", "push", push_url, "main"],
-                       cwd=WORKDIR, check=True, capture_output=True, timeout=120)
-        log("✅ 报告已提交并推送")
+        if _push():
+            log("✅ 报告已提交并推送")
     except Exception as e:
         log(f"⚠️ 报告发布失败: {e}")
 
@@ -287,6 +337,9 @@ def publish_reports(args, tag="local"):
 def sync_state_from_remote():
     """运行前同步远端状态(state/processed.txt, last_bvid.txt), 保证本地和云端一份"""
     try:
+        # 丢弃上次残留的本地 state 改动(每次运行前本来就会 reset, 不需要保留)
+        subprocess.run(["git", "checkout", "--", "state"], cwd=WORKDIR,
+                       capture_output=True, timeout=30)
         r = subprocess.run(["git", "pull", "--ff-only"], cwd=WORKDIR, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=60)
         log(f"同步远端状态: 返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
@@ -347,7 +400,7 @@ def run_slot(args):
     model = get_ollama_model()
     log(f"🚀 云端未处理, 本地开始运行 (Ollama {model})")
     if not set_local_claimed():
-        log("❌ 告警: 认领标志重试3次(间隔2秒)仍全部失败, 放弃本次运行并退出, 避免双端冲突")
+        log("❌ 告警: 认领标志重试3次(间隔2秒)仍全部失败, 放弃本次运行 (守护进程继续等待下个时段)")
         return False
     try:
         sync_state_from_remote()   # 先同步云端 state, 本地受制于云端
@@ -355,6 +408,7 @@ def run_slot(args):
         run_monitor(args)
         publish_reports(args)
     finally:
+        commit_state(args, "local")   # 没日报/异常时也提交 state, 避免脏状态挡下次 pull
         stop_ollama_model(model)   # 提交报告后停止大模型, 释放内存
         clear_local_claimed()
     return True
@@ -402,6 +456,11 @@ def main():
                     if key == "r":
                         log("🔄 手动触发立即运行")
                         run_slot(args)
+                        # 手动运行覆盖了当前宽限期内的 slot, 记录避免随后自动重复跑
+                        now_after = datetime.datetime.now(CN_TZ)
+                        due_after = find_due_slot(now_after, times, last_run_slot)
+                        if due_after is not None:
+                            last_run_slot = due_after
                         last_logged_next = None
                         break
                     if key == "q":

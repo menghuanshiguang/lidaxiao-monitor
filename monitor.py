@@ -199,7 +199,7 @@ def write_text(path, text):
 def read_state_lines(path):
     lines = []
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith("#"):
@@ -774,6 +774,9 @@ def _call_dsc(pcfg, token, prompt):
                              timeout=pcfg.get("timeout", 300) + 60, env=env)
     except subprocess.TimeoutExpired:
         raise RuntimeError("deepseek-chat-cli 调用超时")
+    finally:
+        # 用完即删, 避免 data/dsc_profiles 无限膨胀
+        shutil.rmtree(profile_dir, ignore_errors=True)
     if res.returncode != 0:
         raise RuntimeError(
             f"deepseek-chat-cli 失败 exit={res.returncode}: {(res.stderr or res.stdout)[-500:]}")
@@ -1093,7 +1096,9 @@ def process_video(cfg, api_key, video):
         subtitle_text, stats = ocr_video(cfg, mp4, bvid)
         if not subtitle_text:
             log("无字幕, 跳过分析")
-            return (True, None, "无字幕,跳过分析")
+            section, sl = build_section(cfg, video, "", None, None)
+            rp = upsert_report(video, section, sl, list_line(video))
+            return (True, rp, "无字幕,跳过分析")
 
     # 分析
     history = load_history(cfg)
@@ -1136,15 +1141,40 @@ def list_line(video):
 def mark_processed(bvid, title, status):
     os.makedirs(STATE_DIR, exist_ok=True)
     p = os.path.join(STATE_DIR, "processed.txt")
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stamp = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S")
     line = f"{bvid}|{stamp}|{status}|{title}"
-    with open(p, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+    keep = []
+    if os.path.exists(p):
+        with open(p, "r", encoding="utf-8-sig") as f:
+            for ln in f:
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if s.split("|", 1)[0].strip() != bvid:
+                    keep.append(s)
+    keep.append(line)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("\n".join(keep) + "\n")
 
 
 def processed_bvids():
     return {l.split("|")[0] for l in read_state_lines(
         os.path.join(STATE_DIR, "processed.txt"))}
+
+
+def processed_status_map():
+    """bvid -> 最近一次处理状态 (ok/partial/error/no-subtitle)"""
+    out = {}
+    for l in read_state_lines(os.path.join(STATE_DIR, "processed.txt")):
+        parts = l.split("|")
+        if len(parts) >= 3:
+            out[parts[0]] = parts[2]
+    return out
+
+
+def is_success_status(status):
+    """视为成功、不需要自动重试的状态"""
+    return status in ("ok", "no-subtitle")
 
 
 def is_from_baseline(video, days=2):
@@ -1172,7 +1202,7 @@ def main():
     if args.limit:
         cfg["limit"] = args.limit
     api_key = load_llm_key()
-    if not api_key:
+    if not cfg.get("local_ollama") and not api_key:
         log("❌ 未找到 LLM 密钥 (OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY, 检查 .env 或环境变量)")
         return 1
 
@@ -1194,13 +1224,18 @@ def main():
         last_file = os.path.join(STATE_DIR, "last_bvid.txt")
         last_bvid = read_text(last_file).strip()
         done = processed_bvids()
+        status_map = processed_status_map()
 
-        if not args.force and last_bvid == latest["bvid"] and latest["bvid"] in done:
-            log(f"无新视频 (最新 {latest['bvid']}), 退出")
+        # 前天以来所有视频都已成功处理时直接退出; 有失败/部分成功/未处理则继续
+        if not args.force and all(
+            v["bvid"] in done and is_success_status(status_map.get(v["bvid"]))
+            for v in videos
+        ):
+            log(f"无新视频 (前天以来均已处理), 退出")
             return 0
 
         # 2. 确定候选: force=仅最新; 首次运行=仅最新;
-        #    常规=last_bvid 之后发布且未处理过的视频 (按时间从旧到新)
+        #    常规=前天以来未处理/失败/部分成功的视频 (按时间从旧到新)
         if args.force:
             candidates = [latest]
             log("--force 模式: 强制处理最新视频")
@@ -1208,12 +1243,8 @@ def main():
             candidates = [latest]
             log("首次运行, 处理最新视频")
         else:
-            try:
-                idx = next(i for i, v in enumerate(videos) if v["bvid"] == last_bvid)
-                new_videos = videos[:idx]           # last_bvid 之前(更新)的视频
-            except StopIteration:
-                new_videos = videos                  # last_bvid 不在列表, 保守处理
-            cand = [v for v in new_videos if v["bvid"] not in done]
+            cand = [v for v in videos
+                    if v["bvid"] not in done or not is_success_status(status_map.get(v["bvid"]))]
             candidates = list(reversed(cand))        # 旧的在前
             if not candidates:
                 log("无新视频 (最新已处理), 退出")

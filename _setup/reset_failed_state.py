@@ -82,7 +82,7 @@ def main():
     os.makedirs("state", exist_ok=True)
     proc = os.path.join("state", "processed.txt")
     if os.path.exists(proc):
-        with open(proc, encoding="utf-8") as f:
+        with open(proc, encoding="utf-8-sig") as f:
             lines = [ln.rstrip("\n") for ln in f if ln.strip()]
         keep, removed = [], []
         for ln in lines:
