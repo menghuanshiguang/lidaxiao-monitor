@@ -27,7 +27,8 @@
     "model": "batiai/qwen3.6-35b:iq3",
     "temperature": 0.3,
     "max_tokens": 8000,
-    "timeout": 600
+    "timeout": 600,
+    "n_cpu_moe": 40
   },
   "llm_fallback": {
     "provider": "deepseek",

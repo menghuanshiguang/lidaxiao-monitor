@@ -656,6 +656,13 @@ def _call_llm_once(pcfg, api_key, system, user):
         "max_tokens": pcfg.get("max_tokens", 4000),
         "stream": False,
     }
+    # Ollama: 透传 MoE CPU 专家数, 等价于 llama-server --n-cpu-moe
+    if pcfg.get("provider") == "ollama":
+        ollama_options = {}
+        if pcfg.get("n_cpu_moe"):
+            ollama_options["num_cpu_moe"] = pcfg["n_cpu_moe"]
+        if ollama_options:
+            payload["options"] = ollama_options
     effort = (pcfg.get("reasoningEffort") or "").strip()
     if effort:
         # 推理模型 (如 deepseek-v4-flash): OpenCode Zen Go 的 deepseek 思维格式

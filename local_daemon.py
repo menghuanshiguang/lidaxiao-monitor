@@ -216,6 +216,7 @@ def run_monitor(args, local=True):
     env = dict(os.environ)
     if local:
         env["LIDAXIAO_LOCAL"] = "1"
+        env.setdefault("OLLAMA_N_CPU_MOE", "40")
     env["PYTHONIOENCODING"] = "utf-8"
     log("执行: " + " ".join(cmd))
     try:
