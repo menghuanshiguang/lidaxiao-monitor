@@ -237,14 +237,51 @@ def _push_url():
     return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
 
 
+def _rebase_conflicted_paths():
+    r = subprocess.run(["git", "diff", "--name-only", "--diff-filter=U"],
+                       cwd=WORKDIR, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=30)
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _resolve_rebase_conflicts():
+    """rebase 冲突自动解决: docs/reports 与 state 以本地版本为准 (本地优先)"""
+    paths = _rebase_conflicted_paths()
+    if not paths:
+        return False
+    log(f"检测到冲突文件: {paths}")
+    for p in paths:
+        # 只自动处理报告和状态文件; 其他文件冲突不擅自处理
+        if p.startswith("docs/reports") or p == "state" or p.startswith("state/"):
+            # rebase 中本地提交是 theirs, 取本地版本
+            subprocess.run(["git", "checkout", "--theirs", "--", p],
+                           cwd=WORKDIR, capture_output=True, timeout=30)
+            subprocess.run(["git", "add", "--", p],
+                           cwd=WORKDIR, capture_output=True, timeout=30)
+        else:
+            log(f"⚠️ 非报告/状态文件冲突: {p}, 不自动解决")
+            return False
+    env = dict(os.environ)
+    # 用 Python 当编辑器, 避免 Windows Git 自带 true.exe 在沙箱里无法启动
+    env["GIT_EDITOR"] = f'"{sys.executable}" -c "import sys; sys.exit(0)"'
+    r = subprocess.run(["git", "rebase", "--continue"], cwd=WORKDIR,
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60, env=env)
+    log(f"rebase --continue: 返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
+    return r.returncode == 0
+
+
 def _pull_rebase(push_url):
-    """push 前 rebase; 失败自动 abort, 避免仓库卡在 rebase 状态"""
+    """push 前 rebase; 冲突时自动按本地优先解决, 仍失败则 abort"""
     r = subprocess.run(["git", "pull", "--rebase", push_url, "main"],
                        cwd=WORKDIR, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=60)
     log(f"push 前 rebase: 返回码={r.returncode} stdout={r.stdout.strip()!r} stderr={r.stderr.strip()!r}")
     if r.returncode != 0:
-        log("⚠️ rebase 失败, 执行 rebase --abort 恢复")
+        log("⚠️ rebase 失败, 尝试自动解决 docs/reports 与 state 冲突 (本地优先)...")
+        if _resolve_rebase_conflicts():
+            return True
+        log("⚠️ 自动解决失败, 执行 rebase --abort 恢复")
         subprocess.run(["git", "rebase", "--abort"], cwd=WORKDIR,
                        capture_output=True, timeout=30)
         return False
