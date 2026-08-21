@@ -7,7 +7,7 @@ import sys
 import requests
 
 WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-URL = "http://localhost:11434/v1/chat/completions"
+URL = "http://localhost:11434/api/chat"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -30,8 +30,15 @@ def load_model_and_options():
     }
     for cfg_key, api_key in mapping.items():
         val = ollama.get(cfg_key)
-        if val:
-            options[api_key] = val
+        if val is None or val == "":
+            continue
+        # 兼容 "30" 这种字符串数字, Ollama 要求整数
+        try:
+            val = int(val)
+        except (TypeError, ValueError):
+            pass
+        options[api_key] = val
+    options["num_predict"] = ollama.get("max_tokens", 8000)
     return model, options
 
 
@@ -67,9 +74,15 @@ def main():
         try:
             r = requests.post(URL, json=payload, timeout=1800)
             r.raise_for_status()
-            content = r.json()["choices"][0]["message"]["content"].strip()
+            content = (r.json().get("message", {}).get("content") or "").strip()
             print(content)
             history.append({"role": "assistant", "content": content})
+        except requests.exceptions.HTTPError as e:
+            detail = ""
+            if e.response is not None:
+                detail = e.response.text[:500]
+            print(f"\n[错误] {e} {detail}")
+            history.pop()
         except Exception as e:
             print(f"\n[错误] {e}")
             history.pop()

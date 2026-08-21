@@ -643,8 +643,55 @@ def merge_ts_lines(a, b):
 # =====================================================================
 # 4. AI 分析
 # =====================================================================
+def _call_ollama_native(pcfg, system, user):
+    """Ollama 走原生 /api/chat, 确保 num_gpu/ngl 等参数真正生效"""
+    import requests
+    base = pcfg["base_url"].rstrip("/")
+    if base.endswith("/v1"):
+        api_url = base[:-3] + "/api/chat"
+    else:
+        api_url = base + "/api/chat"
+    options = {}
+    option_map = {
+        "n_cpu_moe": "num_cpu_moe",
+        "num_batch": "num_batch",
+        "num_ubatch": "num_ubatch",
+        "cache_ram": "cache_ram",
+    }
+    for cfg_key, api_key in option_map.items():
+        val = pcfg.get(cfg_key)
+        if val is None or val == "":
+            continue
+        # 兼容 "30" 这种字符串数字, Ollama 要求整数
+        try:
+            val = int(val)
+        except (TypeError, ValueError):
+            pass
+        options[api_key] = val
+    options["num_predict"] = pcfg.get("max_tokens", 4000)
+    options["temperature"] = pcfg.get("temperature", 0.3)
+    payload = {
+        "model": pcfg["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+        "options": options,
+    }
+    r = requests.post(api_url, json=payload, timeout=pcfg.get("timeout", 180))
+    try:
+        r.raise_for_status()
+    except requests.HTTPError:
+        raise RuntimeError(f"Ollama API {r.status_code}: {r.text[:500]}")
+    j = r.json()
+    return (j.get("message", {}).get("content") or "").strip()
+
+
 def _call_llm_once(pcfg, api_key, system, user):
     """向单个 LLM provider 发起一次 Chat Completions 请求"""
+    if pcfg.get("provider") == "ollama":
+        return _call_ollama_native(pcfg, system, user)
     import requests
     url = pcfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
