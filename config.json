@@ -28,7 +28,10 @@
     "temperature": 0.3,
     "max_tokens": 8000,
     "timeout": 600,
-    "n_cpu_moe": 40
+    "n_cpu_moe": 40,
+    "num_batch": 2816,
+    "num_ubatch": 2816,
+    "cache_ram": 8192
   },
   "llm_fallback": {
     "provider": "deepseek",

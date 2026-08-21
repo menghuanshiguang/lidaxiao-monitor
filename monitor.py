@@ -656,11 +656,19 @@ def _call_llm_once(pcfg, api_key, system, user):
         "max_tokens": pcfg.get("max_tokens", 4000),
         "stream": False,
     }
-    # Ollama: 透传 MoE CPU 专家数, 等价于 llama-server --n-cpu-moe
+    # Ollama: 透传 MoE/批处理/缓存参数, 等价于 llama-server 的对应 flag
     if pcfg.get("provider") == "ollama":
         ollama_options = {}
-        if pcfg.get("n_cpu_moe"):
-            ollama_options["num_cpu_moe"] = pcfg["n_cpu_moe"]
+        option_map = {
+            "n_cpu_moe": "num_cpu_moe",
+            "num_batch": "num_batch",
+            "num_ubatch": "num_ubatch",
+            "cache_ram": "cache_ram",
+        }
+        for cfg_key, api_key in option_map.items():
+            val = pcfg.get(cfg_key)
+            if val:
+                ollama_options[api_key] = val
         if ollama_options:
             payload["options"] = ollama_options
     effort = (pcfg.get("reasoningEffort") or "").strip()
