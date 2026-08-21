@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import requests
@@ -252,14 +253,77 @@ def _pull_rebase(push_url):
     return True
 
 
+PROTECTED_PATHS = ("docs/reports", "state")
+
+
+def _snapshot_protected():
+    """推送前备份本地生成的报告/状态文件, 合并后强制恢复成本地版本"""
+    tmp = tempfile.mkdtemp(prefix="dsh_push_")
+    for rel in PROTECTED_PATHS:
+        src = os.path.join(WORKDIR, rel)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(tmp, rel))
+        elif os.path.isfile(src):
+            os.makedirs(os.path.dirname(os.path.join(tmp, rel)), exist_ok=True)
+            shutil.copy2(src, os.path.join(tmp, rel))
+    return tmp
+
+
+def _restore_protected(tmp):
+    """把 docs/reports 与 state 强制覆盖成本地版本, 并 git add"""
+    for rel in PROTECTED_PATHS:
+        src_root = os.path.join(tmp, rel)
+        dst_root = os.path.join(WORKDIR, rel)
+        if not os.path.exists(src_root):
+            continue
+        if os.path.isdir(src_root):
+            for root, _, files in os.walk(src_root):
+                rel_dir = os.path.relpath(root, src_root)
+                dst_dir = os.path.join(dst_root, rel_dir) if rel_dir != "." else dst_root
+                os.makedirs(dst_dir, exist_ok=True)
+                for f in files:
+                    shutil.copy2(os.path.join(root, f), os.path.join(dst_dir, f))
+        elif os.path.isfile(src_root):
+            os.makedirs(os.path.dirname(dst_root), exist_ok=True)
+            shutil.copy2(src_root, dst_root)
+        subprocess.run(["git", "add", "--", rel], cwd=WORKDIR,
+                       capture_output=True, timeout=30)
+
+
 def _push():
-    """提交后执行 merge+push, 成功返回 True"""
+    """提交后执行 merge+push; 报告/state 始终以本地版本为准, 成功返回 True"""
     push_url = _push_url()
-    if not _pull_rebase(push_url):
-        return False
-    subprocess.run(["git", "push", push_url, "main"],
-                   cwd=WORKDIR, check=True, capture_output=True, timeout=120)
-    return True
+    backup = _snapshot_protected()
+    try:
+        if not _pull_rebase(push_url):
+            return False
+        _restore_protected(backup)
+        # 合并可能把报告/state 改坏(重复/丢章节), 强制恢复本地版本
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet", "--",
+                               "docs/reports", "state"],
+                              cwd=WORKDIR, capture_output=True, timeout=30)
+        if diff.returncode != 0:
+            unmerged = subprocess.run(["git", "diff", "--name-only", "--diff-filter=U"],
+                                      cwd=WORKDIR, capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=30)
+            if unmerged.stdout.strip():
+                log(f"⚠️ 仍有非报告/state 冲突未解决: {unmerged.stdout.strip()}, 中止推送")
+                subprocess.run(["git", "merge", "--abort"], cwd=WORKDIR,
+                               capture_output=True, timeout=30)
+                return False
+            in_merge = os.path.exists(os.path.join(WORKDIR, ".git", "MERGE_HEAD"))
+            if in_merge:
+                subprocess.run(["git", "commit", "--no-edit"], cwd=WORKDIR,
+                               check=True, capture_output=True, timeout=30)
+            else:
+                subprocess.run(["git", "commit", "--amend", "--no-edit"], cwd=WORKDIR,
+                               check=True, capture_output=True, timeout=30)
+            log("✅ 已强制恢复本地报告/state 版本")
+        subprocess.run(["git", "push", push_url, "main"],
+                       cwd=WORKDIR, check=True, capture_output=True, timeout=120)
+        return True
+    finally:
+        shutil.rmtree(backup, ignore_errors=True)
 
 
 def commit_state(args, tag="local"):
