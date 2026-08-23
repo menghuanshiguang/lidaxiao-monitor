@@ -47,6 +47,29 @@ try:
 except Exception:
     pass
 
+try:
+    import ctypes
+except ImportError:
+    ctypes = None
+
+
+def _disable_quickedit():
+    """关闭控制台 QuickEdit, 防止鼠标点击选中文本后输出冻结(需按回车才恢复)"""
+    if ctypes is None:
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        ENABLE_QUICK_EDIT_MODE = 0x0040
+        handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            new_mode = (mode.value & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS
+            kernel32.SetConsoleMode(handle, new_mode)
+    except Exception:
+        pass
+
 
 def check_key():
     """读取控制台按键(小写); 无按键返回 None"""
@@ -489,6 +512,8 @@ def main():
                     help="兼容参数(已不再等待, 保留无效果)")
     ap.add_argument("--config", default=None, help="传给 monitor.py 的配置文件")
     args = ap.parse_args()
+
+    _disable_quickedit()   # 防止控制台 QuickEdit 导致输出冻结
 
     times = [t.strip() for t in args.times.split(",") if t.strip()]
     log(f"本地常驻启动: 计划 {times} (北京时间), 云端仓库 {REPO} (黑框内按 R 立即运行 / Q 退出)")
