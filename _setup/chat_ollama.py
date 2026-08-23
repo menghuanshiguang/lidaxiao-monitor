@@ -15,6 +15,29 @@ try:
 except Exception:
     pass
 
+try:
+    import ctypes
+except ImportError:
+    ctypes = None
+
+
+def _disable_quickedit():
+    """关闭控制台 QuickEdit, 防止鼠标点击选中文本后输出冻结"""
+    if ctypes is None:
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        ENABLE_QUICK_EDIT_MODE = 0x0040
+        handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+        mode = ctypes.c_uint32()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            new_mode = (mode.value & ~ENABLE_QUICK_EDIT_MODE) | ENABLE_EXTENDED_FLAGS
+            kernel32.SetConsoleMode(handle, new_mode)
+    except Exception:
+        pass
+
 
 def load_model_and_options():
     with open(os.path.join(WORKDIR, "config.json"), encoding="utf-8") as f:
@@ -43,6 +66,7 @@ def load_model_and_options():
 
 
 def main():
+    _disable_quickedit()
     model, options = load_model_and_options()
     print("=" * 60)
     print("Ollama 对话客户端")
