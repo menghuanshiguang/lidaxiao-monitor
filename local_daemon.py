@@ -262,6 +262,62 @@ def _push_url():
     return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
 
 
+def _merge_report(new_text, old_text):
+    """合并两份日报: 保留旧报告中不在新报告里的视频章节, 新报告的章节覆盖旧的同BV章节"""
+    # 解析旧报告的视频章节 (按BV定位)
+    sec_re = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$")
+    old_secs = {}  # bvid -> (header_line, content)
+    old_lines = old_text.splitlines()
+    cur_bvid = None
+    cur_start = None
+    for i, ln in enumerate(old_lines):
+        m = sec_re.match(ln)
+        if m:
+            if cur_bvid and cur_start is not None:
+                old_secs[cur_bvid] = "\n".join(old_lines[cur_start:i])
+            cur_bvid = m.group(2)
+            cur_start = i
+    if cur_bvid and cur_start is not None:
+        old_secs[cur_bvid] = "\n".join(old_lines[cur_start:])
+    if not old_secs:
+        return new_text  # 旧报告无法解析, 直接用新报告
+    # 解析新报告的视频章节
+    new_secs = {}  # bvid -> (header_line, content)
+    new_lines = new_text.splitlines()
+    cur_bvid = None
+    cur_start = None
+    for i, ln in enumerate(new_lines):
+        m = sec_re.match(ln)
+        if m:
+            if cur_bvid and cur_start is not None:
+                new_secs[cur_bvid] = "\n".join(new_lines[cur_start:i])
+            cur_bvid = m.group(2)
+            cur_start = i
+    if cur_bvid and cur_start is not None:
+        new_secs[cur_bvid] = "\n".join(new_lines[cur_start:])
+    # 合并: 新报告的章节 + 旧报告中不在新报告里的章节
+    merged_secs = []
+    added = set()
+    for bvid, sec_text in new_secs.items():
+        merged_secs.append(sec_text)
+        added.add(bvid)
+    for bvid, sec_text in old_secs.items():
+        if bvid not in added:
+            merged_secs.append(sec_text)
+    # 重建报告: 取新报告的 header + summary + list, 追加合并后的章节
+    sec_start = len(new_lines)
+    for i, ln in enumerate(new_lines):
+        if sec_re.match(ln):
+            sec_start = i
+            break
+    header = "\n".join(new_lines[:sec_start]).rstrip()
+    body = "\n\n".join(merged_secs)
+    # 重新编号章节 (合并后序号可能重复)
+    n_gen = (i for i in range(1, 100))
+    body = re.sub(r"^## 视频\d+:", lambda m: f"## 视频{next(n_gen)}:", body, flags=re.M)
+    return header + "\n\n" + body + "\n"
+
+
 def _pull_rebase(push_url):
     """push 前合并远端; 冲突时用 -X ours 让本地版本优先 (本地优先)"""
     r = subprocess.run(
@@ -393,7 +449,21 @@ def publish_reports(args, tag="local"):
 
     os.makedirs(docs_dir, exist_ok=True)
     for f in daily:
-        shutil.copy2(os.path.join(reports_dir, f), os.path.join(docs_dir, f))
+        src = os.path.join(reports_dir, f)
+        dst = os.path.join(docs_dir, f)
+        if os.path.exists(dst):
+            try:
+                old_text = open(dst, encoding="utf-8").read()
+                new_text = open(src, encoding="utf-8").read()
+                merged = _merge_report(new_text, old_text)
+                with open(dst, "w", encoding="utf-8") as fout:
+                    fout.write(merged)
+                log(f"报告已合并: {f}")
+            except Exception as e:
+                log(f"⚠️ 合并报告失败({f}), 回退为覆盖: {e}")
+                shutil.copy2(src, dst)
+        else:
+            shutil.copy2(src, dst)
     # latest.md = 最新日报
     latest = daily[-1]
     shutil.copy2(os.path.join(docs_dir, latest), os.path.join(docs_dir, "latest.md"))
