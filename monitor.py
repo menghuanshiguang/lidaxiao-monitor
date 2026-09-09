@@ -127,7 +127,7 @@ def load_config(path=None):
             "max_tokens": 6000,                 # 推理模型: 需留足思考token, 否则返回空
             "timeout": 240,
             "tail_seconds": 45,                 # 片尾扫描窗口(秒)
-            "max_frames": 4,                    # 去重后送模型的最大帧数
+            "max_frames": 6,                    # 送模型的最大帧数(覆盖不同场景)
             "max_width": 1280,                  # 帧降采样宽度(省token)
             "jpeg_quality": 85,
         },
@@ -413,6 +413,7 @@ def get_space_videos(cfg, count):
         if info:
             v["pubdate"] = info.get("pubdate", 0)
             v["title"] = info.get("title", v.get("title", ""))
+            v["duration"] = info.get("duration", 0)
         else:
             v["pubdate"] = 0
     return result
@@ -456,6 +457,77 @@ def download_video(cfg, bvid, retries=None):
             return existing
         log(f"bilidown 返回成功但未找到mp4 (第{i+1}次)\n{out[-300:]}\n{err[-300:]}")
     return None
+
+
+def expected_duration(video):
+    """期望时长(秒): B站 API duration 优先, 其次解析 dur_str ("06:21")"""
+    d = float(video.get("duration") or 0)
+    if d > 0:
+        return d
+    parts = []
+    for x in (video.get("dur_str") or "").split(":"):
+        x = x.strip()
+        if x.isdigit():
+            parts.append(int(x))
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return 0.0
+
+
+def ensure_complete_download(cfg, video, mp4, tol=0.97):
+    """下载完整性校验: 实际时长明显短于B站元数据 -> 重下一次。
+
+    截断的 mp4(容器头仍报完整时长)会让 ffmpeg 提前结束, 抽帧数变少,
+    直接后果是字幕不全、片尾窗口落在视频中间(读不到真正的片尾)。
+    返回 (mp4, warn): warn 非空表示最终仍残缺, 需要写进报告提醒。
+    """
+    if not mp4 or not os.path.exists(mp4):
+        return mp4, ""
+    exp = expected_duration(video)
+    got = ffprobe_duration(mp4)
+    if not exp or not got or got >= exp * tol:
+        return mp4, ""
+
+    log(f"⚠️ 下载疑似不完整: 实际 {got:.0f}s / 预期 {exp:.0f}s "
+        f"({got / exp * 100:.0f}%) -> 重新下载")
+    bad = mp4 + ".partial"
+    try:
+        os.replace(mp4, bad)          # 挪走, 让 download_video 重新下载
+    except Exception as e:
+        warn = f"视频下载不完整(实际 {got:.0f}s / 预期 {exp:.0f}s), 内容可能缺失"
+        log(f"⚠️ 无法移走残缺文件({e}), 不再重下; {warn}")
+        return mp4, warn
+
+    again = download_video(cfg, video["bvid"])
+    got2 = ffprobe_duration(again) if again else 0.0
+    if again and got2 > got:
+        try:
+            os.remove(bad)
+        except Exception:
+            pass
+        if got2 >= exp * tol:
+            log(f"✅ 重新下载完整: {got2:.0f}s / 预期 {exp:.0f}s")
+            return again, ""
+        warn = f"视频下载仍不完整(实际 {got2:.0f}s / 预期 {exp:.0f}s), 内容可能缺失"
+        log("⚠️ " + warn)
+        return again, warn
+
+    # 重下反而更短/失败 -> 恢复原文件
+    if again:
+        try:
+            os.remove(again)
+        except Exception:
+            pass
+    if os.path.exists(bad):
+        try:
+            os.replace(bad, mp4)
+        except Exception:
+            pass
+    warn = f"视频下载不完整(实际 {got:.0f}s / 预期 {exp:.0f}s), 内容可能缺失"
+    log("⚠️ " + warn)
+    return mp4, warn
 
 
 # =====================================================================
@@ -672,16 +744,17 @@ def merge_ts_lines(a, b):
 #     李大霄视频片尾固定是"卡片区": 口播结束语 + 荐书卡 + 合规声明卡(+偶尔数据面板),
 #     这类整屏密集文字会被 OCR 的字数/数字过滤规则丢弃, 因此单独用视觉模型读片尾。
 # =====================================================================
-ENDING_PROMPT_VER = 1          # 提示词版本: 升版后旧缓存自动失效重跑
+ENDING_PROMPT_VER = 2          # 提示词版本: 升版后旧缓存自动失效重跑
 ENDING_PROMPT = """这是同一条财经短视频"片尾"(最后几十秒)的连续画面, 按时间顺序给出, 已去重。
-请识别片尾画面里出现的文字/口播字幕, 严格按下面 4 行输出(简体中文, 每行一条, 不要解释、不要逐帧罗列、相同内容只写一次):
+请识别片尾画面里的**文字与图形**, 严格按下面 5 行输出(简体中文, 每行一条, 不要解释、不要逐帧罗列、相同内容只写一次):
 
 【片尾口语】片尾画面中的口播字幕/结束语原文(多条用" / "连接; 没有就写"无")
 【片尾卡片】片尾固定卡片: 类型(声明/荐书/数据面板/其他)+关键文字, 多张卡片用" ; "分隔, 每张不超过40字
+【片尾画面】片尾出现的图形/动画/插图: 地球/星球/球体、钻石、婴儿、山峰/山谷、人物、箭头、图标、图表、二维码等, 写清形态与大致位置(如"左侧蓝色地球带云层, 前景人物侧脸"); 没有图形就写"无"
 【片尾数据】片尾画面中的具体数据/标的/日期(没有就写"无")
-【片尾暗示】用1-2句话判断片尾传递的信号(例如: 纯合规声明=无额外信号; 荐书=带货引流; 数据面板=强调某指标; 结束语=对市场态度的最后暗示)
+【片尾暗示】用1-2句判断片尾传递的信号。若片尾出现李大霄的标志性比喻图形, 必须点明其含义(地球/星球≈"地球顶"·高位风险提示; 钻石≈"钻石底"·低位机会; 婴儿/儿童≈"婴儿底"·底部区域; 顶部/底部箭头、山峰/山谷同理); 没有出现就不要提, 不要编造
 
-要求: 只写图中真实存在的文字, 不要编造; 全文不超过400字。"""
+要求: 只描述画面里真实存在的内容(文字或图形), 不要臆造; 全文不超过500字。"""
 
 
 def _ending_cache_path():
@@ -743,45 +816,49 @@ def tail_frames(cfg, video_path, bvid):
     return sorted(glob.glob(os.path.join(edir, "*.jpg")))[-want:]
 
 
-def _avg_hash(path, size=8):
-    """平均哈希(64bit), 用于片尾帧去重"""
-    try:
-        from PIL import Image
-        with Image.open(path) as im:
-            px = list(im.convert("L").resize((size, size)).getdata())
-    except Exception:
-        return None
-    if not px:
-        return None
-    avg = sum(px) / len(px)
-    bits = 0
-    for i, v in enumerate(px):
-        if v >= avg:
-            bits |= (1 << i)
-    return bits
+def frame_sig(path, size=16):
+    """16x16 灰度签名: 比 64bit 平均哈希更能区分"深色背景+不同画面"的片尾卡片"""
+    from PIL import Image
+    with Image.open(path) as im:
+        return list(im.convert("L").resize((size, size)).getdata())
 
 
-def _hamming(a, b):
-    return bin(a ^ b).count("1")
+def _sig_mad(a, b):
+    """两张图签名的平均绝对差 (0~255)"""
+    return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
 
 
-def dedupe_frames(paths, max_keep=4, max_dist=4):
-    """按平均哈希去重(同一张卡片只留第一帧), 再均匀取样 max_keep 帧(保证含最后一帧)"""
-    uniq = []
-    for p in paths:
-        h = _avg_hash(p)
-        if h is None:
-            continue
-        if any(_hamming(h, uh) <= max_dist for uh, _ in uniq):
-            continue
-        uniq.append((h, p))
-    picks = [p for _, p in uniq]
-    if len(picks) <= max_keep:
-        return picks
-    if max_keep <= 1:
-        return [picks[-1]]
-    idx = sorted({round(i * (len(picks) - 1) / (max_keep - 1)) for i in range(max_keep)})
-    return [picks[i] for i in idx]
+def dedupe_frames(paths, max_keep=6, dup_th=3.0):
+    """片尾选帧 (两阶段):
+
+    1) 相邻近似帧合并: 同一张卡片/同一句字幕只留一帧
+    2) 最远点采样: 在剩余帧里反复挑"与已选帧差异最大"的, 覆盖不同画面
+       (口播结束语 / 荐书卡 / 地球动画 / 声明卡 是不同场景, 均匀取样会整段漏掉)
+    必含最后一帧所在场景(片尾声明卡)。
+    """
+    if not paths:
+        return []
+    kept = [paths[0]]
+    sigs = {paths[0]: frame_sig(paths[0])}
+    for p in paths[1:]:
+        s = frame_sig(p)
+        sigs[p] = s
+        if _sig_mad(s, sigs[kept[-1]]) >= dup_th:
+            kept.append(p)
+
+    picks = [kept[-1]]                       # 从最后一帧(声明卡)开始
+    while len(picks) < max_keep and len(picks) < len(kept):
+        best, best_d = None, -1.0
+        for p in kept:
+            if p in picks:
+                continue
+            d = min(_sig_mad(sigs[p], sigs[q]) for q in picks)
+            if d > best_d:
+                best, best_d = p, d
+        if best is None or best_d <= 0:
+            break
+        picks.append(best)
+    return sorted(picks)
 
 
 def frame_data_url(path, max_width=1280, quality=85):
@@ -874,7 +951,7 @@ def read_ending_hint(cfg, video, video_path=None, force=False):
     if not frames:
         log("片尾识别: 无可用片尾帧, 跳过")
         return None
-    picks = dedupe_frames(frames, int(vcfg.get("max_frames", 4) or 4))
+    picks = dedupe_frames(frames, int(vcfg.get("max_frames", 6) or 6))
     log(f"片尾识别: 候选 {len(frames)} 帧 -> 去重后送 {len(picks)} 帧 "
         f"({', '.join(os.path.basename(x) for x in picks)})")
 
@@ -1422,9 +1499,11 @@ def upsert_report(video, section_md, summary_line, list_line):
     return rp
 
 
-def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None):
+def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, warn=None):
     """生成单个视频的报告章节 markdown"""
     head = f"## 视频1:《{video['title']}》 ({video['bvid']})"
+    if warn:
+        head += f"\n\n> ⚠️ {warn}"
     emd = ending_md(ending).strip()
 
     def with_tail(text):
@@ -1492,6 +1571,7 @@ def process_video(cfg, api_key, video):
     mp4 = find_downloaded_mp4(bvid)
     if not mp4:
         mp4 = download_video(cfg, bvid)
+    mp4, dl_warn = ensure_complete_download(cfg, video, mp4)
     if not mp4:
         note = f"下载失败(重试后仍失败), 已跳过: {bvid}"
         log("❌ " + note)
@@ -1508,7 +1588,7 @@ def process_video(cfg, api_key, video):
 
     if not subtitle_text:
         log("无字幕, 跳过分析")
-        section, sl = build_section(cfg, video, "", None, None, ending=ending)
+        section, sl = build_section(cfg, video, "", None, None, ending=ending, warn=dl_warn)
         rp = upsert_report(video, section, sl, list_line(video))
         return (True, rp, "无字幕,跳过分析")
 
@@ -1534,13 +1614,15 @@ def process_video(cfg, api_key, video):
     if analysis is None:
         note = f"AI分析失败: {last_err}"
         log("❌ " + note)
-        section, sl = build_section(cfg, video, subtitle_text, None, None, ending=ending)
+        section, sl = build_section(cfg, video, subtitle_text, None, None,
+                                    ending=ending, warn=dl_warn)
         section = section + f"\n> ⚠️ AI分析失败: {last_err}\n"
         rp = upsert_report(video, section, sl, list_line(video))
         return (False, rp, note)
 
     # 写报告
-    section, summary_line = build_section(cfg, video, subtitle_text, analysis, None, ending=ending)
+    section, summary_line = build_section(cfg, video, subtitle_text, analysis, None,
+                                          ending=ending, warn=dl_warn)
     rp = upsert_report(video, section, summary_line, list_line(video))
     log(f"✅ 视频处理完成: {bvid}")
     return (True, rp, "ok")

@@ -48,7 +48,7 @@
     "max_tokens": 6000,
     "timeout": 240,
     "tail_seconds": 45,
-    "max_frames": 4,
+    "max_frames": 6,
     "max_width": 1280,
     "jpeg_quality": 85
   },
