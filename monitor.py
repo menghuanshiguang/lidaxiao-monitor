@@ -7,21 +7,27 @@
   1. 更新检测  : bilidown space 获取 UP主最新视频, 与 data/last_bvid.txt 对比
   2. 视频下载  : bilidown dl 下载 480P mp4 (失败重试1次)
   3. 字幕提取  : ffmpeg 抽帧 + RapidOCR 硬字幕识别 (自适应字幕区域 + 相邻帧去重)
-  4. AI 分析   : OpenCode Zen Go API (deepseek-v4-flash) 对字幕做"李大霄话术解码"分析
-  5. 每日报告  : reports/YYYY-MM-DD.md (当天已有报告则追加)
-  6. 状态幂等  : data/last_bvid.txt + data/processed.txt + 并发锁
+  4. 片尾识别  : ffmpeg 取片尾帧 + deepseek-v4-flash 视觉模型读"片尾暗示"
+                (结束语/荐书卡/合规声明卡/数据面板; OCR 会丢弃的整屏密集文字)
+  5. AI 分析   : OpenCode Zen Go API (deepseek-v4-flash) 对字幕+片尾做"李大霄话术解码"分析
+  6. 每日报告  : reports/YYYY-MM-DD.md (当天已有报告则追加)
+  7. 状态幂等  : data/last_bvid.txt + data/processed.txt + 并发锁
+                (片尾识别结果缓存于 state/ending_hints.json, 随仓库同步)
 
 用法:
   python monitor.py            # 正常运行 (无新视频秒退)
   python monitor.py --force    # 强制重新处理最新视频
   python monitor.py --uid 2137589551 --limit 10
   python monitor.py --config config.json
+  python monitor.py --check-vision   # 仅自检片尾视觉通道 (Actions 预检用)
 
 退出码: 0=正常(含无更新)  1=出错
 """
 import argparse
+import base64
 import datetime
 import glob
+import io
 import json
 import os
 import re
@@ -113,6 +119,25 @@ def load_config(path=None):
             "max_tokens": 8000,
             "timeout": 600,
         },
+        "vision": {                             # 片尾画面识别 (deepseek-v4-flash 视觉)
+            "enabled": True,
+            "provider": "opencode-go",
+            "base_url": "https://opencode.ai/zen/go/v1",
+            "model": "deepseek-v4-flash-vision-exp",
+            "max_tokens": 6000,                 # 推理模型: 需留足思考token, 否则返回空
+            "timeout": 240,
+            "tail_seconds": 45,                 # 片尾扫描窗口(秒)
+            "max_frames": 4,                    # 去重后送模型的最大帧数
+            "max_width": 1280,                  # 帧降采样宽度(省token)
+            "jpeg_quality": 85,
+        },
+        "vision_fallback": {                    # 视觉兜底: DeepSeek 官方 API (同一模型)
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "model": "deepseek-v4-flash-vision-exp",
+            "max_tokens": 6000,
+            "timeout": 240,
+        },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
     }
@@ -125,6 +150,8 @@ def load_config(path=None):
         cfg["llm_fallback"].update(user.get("llm_fallback", {}))
         cfg["llm_cli"].update(user.get("llm_cli", {}))
         cfg["llm_ollama"].update(user.get("llm_ollama", {}))
+        cfg["vision"].update(user.get("vision", {}))
+        cfg["vision_fallback"].update(user.get("vision_fallback", {}))
     # 本地模式开关: 环境变量 LIDAXIAO_LOCAL=1 或 config.json local_ollama=true
     cfg["local_ollama"] = bool(user.get("local_ollama", False)) if os.path.exists(p) else False
     if os.environ.get("LIDAXIAO_LOCAL") == "1":
@@ -641,6 +668,299 @@ def merge_ts_lines(a, b):
 
 
 # =====================================================================
+# 3.5 片尾画面识别 (deepseek-v4-flash 视觉能力)
+#     李大霄视频片尾固定是"卡片区": 口播结束语 + 荐书卡 + 合规声明卡(+偶尔数据面板),
+#     这类整屏密集文字会被 OCR 的字数/数字过滤规则丢弃, 因此单独用视觉模型读片尾。
+# =====================================================================
+ENDING_PROMPT_VER = 1          # 提示词版本: 升版后旧缓存自动失效重跑
+ENDING_PROMPT = """这是同一条财经短视频"片尾"(最后几十秒)的连续画面, 按时间顺序给出, 已去重。
+请识别片尾画面里出现的文字/口播字幕, 严格按下面 4 行输出(简体中文, 每行一条, 不要解释、不要逐帧罗列、相同内容只写一次):
+
+【片尾口语】片尾画面中的口播字幕/结束语原文(多条用" / "连接; 没有就写"无")
+【片尾卡片】片尾固定卡片: 类型(声明/荐书/数据面板/其他)+关键文字, 多张卡片用" ; "分隔, 每张不超过40字
+【片尾数据】片尾画面中的具体数据/标的/日期(没有就写"无")
+【片尾暗示】用1-2句话判断片尾传递的信号(例如: 纯合规声明=无额外信号; 荐书=带货引流; 数据面板=强调某指标; 结束语=对市场态度的最后暗示)
+
+要求: 只写图中真实存在的文字, 不要编造; 全文不超过400字。"""
+
+
+def _ending_cache_path():
+    return os.path.join(STATE_DIR, "ending_hints.json")
+
+
+def load_ending_cache():
+    p = _ending_cache_path()
+    if not os.path.exists(p):
+        return {}
+    try:
+        return json.loads(read_text(p) or "{}")
+    except Exception:
+        return {}
+
+
+def save_ending_cache(cache):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    write_text(_ending_cache_path(),
+               json.dumps(cache, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
+
+
+def tail_frames(cfg, video_path, bvid):
+    """取片尾候选帧: 优先复用 OCR 已抽的帧(零成本), 否则用 ffmpeg 只抽片尾"""
+    vcfg = cfg.get("vision") or {}
+    tail_s = float(vcfg.get("tail_seconds", 45) or 45)
+    dur = ffprobe_duration(video_path) if video_path else 0.0
+    interval = cfg.get("frame_interval") or max(1.0, min(4.0, (dur or 240) / 160.0))
+    want = int(max(6, min(40, tail_s / max(0.5, interval) + 2)))
+
+    fdir = os.path.join(WORKDIR, "data", "frames", bvid)
+    frames = sorted(glob.glob(os.path.join(fdir, "*.jpg")))
+    if frames:
+        return frames[-want:]
+
+    if not video_path or not os.path.exists(video_path):
+        return []
+    edir = os.path.join(WORKDIR, "data", "ending_frames", bvid)
+    cached = sorted(glob.glob(os.path.join(edir, "*.jpg")))
+    if cached:
+        return cached[-want:]
+    os.makedirs(edir, exist_ok=True)
+    pat = os.path.join(edir, "t_%03d.jpg")
+    cmd = [FFMPEG, "-y", "-v", "error", "-sseof", f"-{tail_s:.0f}",
+           "-i", video_path, "-vf", "fps=1", "-q:v", "3", pat]
+    log(f"片尾抽帧: 最后 {tail_s:.0f}s -> {edir}")
+    try:
+        subprocess.run(cmd, check=True, timeout=600, capture_output=True, text=True)
+    except Exception as e:
+        log(f"⚠️ 片尾抽帧失败(-sseof): {e}")
+        # 兜底: 全片 1fps 抽帧后取尾部 (短视频/异常容器时 -sseof 可能不可用)
+        try:
+            subprocess.run([FFMPEG, "-y", "-v", "error", "-i", video_path,
+                            "-vf", "fps=1", "-q:v", "3", pat],
+                           check=True, timeout=1800, capture_output=True, text=True)
+        except Exception as e2:
+            log(f"⚠️ 片尾抽帧失败(全片兜底): {e2}")
+            return []
+    return sorted(glob.glob(os.path.join(edir, "*.jpg")))[-want:]
+
+
+def _avg_hash(path, size=8):
+    """平均哈希(64bit), 用于片尾帧去重"""
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            px = list(im.convert("L").resize((size, size)).getdata())
+    except Exception:
+        return None
+    if not px:
+        return None
+    avg = sum(px) / len(px)
+    bits = 0
+    for i, v in enumerate(px):
+        if v >= avg:
+            bits |= (1 << i)
+    return bits
+
+
+def _hamming(a, b):
+    return bin(a ^ b).count("1")
+
+
+def dedupe_frames(paths, max_keep=4, max_dist=4):
+    """按平均哈希去重(同一张卡片只留第一帧), 再均匀取样 max_keep 帧(保证含最后一帧)"""
+    uniq = []
+    for p in paths:
+        h = _avg_hash(p)
+        if h is None:
+            continue
+        if any(_hamming(h, uh) <= max_dist for uh, _ in uniq):
+            continue
+        uniq.append((h, p))
+    picks = [p for _, p in uniq]
+    if len(picks) <= max_keep:
+        return picks
+    if max_keep <= 1:
+        return [picks[-1]]
+    idx = sorted({round(i * (len(picks) - 1) / (max_keep - 1)) for i in range(max_keep)})
+    return [picks[i] for i in idx]
+
+
+def frame_data_url(path, max_width=1280, quality=85):
+    """帧 -> data:image/jpeg;base64 (降采样省 token)"""
+    from PIL import Image
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        if max_width and im.width > max_width:
+            h = max(1, round(im.height * max_width / im.width))
+            im = im.resize((max_width, h), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def vision_providers(cfg):
+    """视觉 provider 优先级(固定): opencode-go -> DeepSeek 官方 API
+
+    识图不走 deepseek-chat-cli (网页版 CLI 不支持图片输入)。
+    """
+    out = []
+    for k in ("vision", "vision_fallback"):
+        p = cfg.get(k)
+        if not p:
+            continue
+        sig = (p.get("provider"), p.get("base_url"), p.get("model"))
+        if any((q.get("provider"), q.get("base_url"), q.get("model")) == sig for q in out):
+            continue
+        out.append(p)
+    return out
+
+
+def _call_vision_once(pcfg, api_key, prompt, images):
+    """向一个视觉端点发多图请求, 返回文本"""
+    import requests
+    url = pcfg["base_url"].rstrip("/") + "/chat/completions"
+    content = [{"type": "text", "text": prompt}]
+    for p in images:
+        content.append({"type": "image_url", "image_url": {
+            "url": frame_data_url(p, pcfg.get("max_width", 1280), pcfg.get("jpeg_quality", 85))}})
+    base = {"model": pcfg["model"], "messages": [{"role": "user", "content": content}],
+            "stream": False}
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    def post(payload):
+        r = requests.post(url, json=payload, headers=headers,
+                          timeout=pcfg.get("timeout", 240))
+        if r.status_code != 200:
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+    payload = dict(base, max_tokens=pcfg.get("max_tokens", 6000))
+    if pcfg.get("temperature") is not None:
+        payload["temperature"] = pcfg["temperature"]
+    j = post(payload)
+    ch = (j.get("choices") or [{}])[0]
+    text = (ch.get("message", {}).get("content") or "").strip()
+    if not text:
+        # 推理型视觉模型: 思考 token 吃满 max_tokens 时会返回空内容 -> 关思考重试一次
+        log("⚠️ 视觉模型返回空内容(推理token可能耗尽), 关闭思考重试...")
+        try:
+            j2 = post(dict(base, max_tokens=2000, thinking={"type": "disabled"}))
+            text = ((j2.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
+        except Exception as e:
+            raise RuntimeError(f"视觉模型返回空内容, 关思考重试失败: {e}")
+        if not text:
+            raise RuntimeError("视觉模型返回空内容")
+    return text
+
+
+def read_ending_hint(cfg, video, video_path=None, force=False):
+    """读取片尾暗示: 抽片尾帧 -> 视觉模型识别 -> 缓存到 state/ending_hints.json
+
+    返回 dict(provider/model/frames/text/ts) 或 None(未启用/无帧/全部失败)。
+    任何失败都不抛异常, 不影响主流程。
+    """
+    vcfg = cfg.get("vision") or {}
+    if not vcfg.get("enabled", True):
+        return None
+    bvid = video["bvid"]
+    cache = load_ending_cache()
+    hit = cache.get(bvid) or {}
+    if not force and hit.get("text") and hit.get("ver") == ENDING_PROMPT_VER:
+        log(f"片尾识别命中缓存: {bvid}")
+        return hit
+
+    frames = tail_frames(cfg, video_path, bvid)
+    if not frames:
+        log("片尾识别: 无可用片尾帧, 跳过")
+        return None
+    picks = dedupe_frames(frames, int(vcfg.get("max_frames", 4) or 4))
+    log(f"片尾识别: 候选 {len(frames)} 帧 -> 去重后送 {len(picks)} 帧 "
+        f"({', '.join(os.path.basename(x) for x in picks)})")
+
+    last_err = ""
+    for pcfg in vision_providers(cfg):
+        provider = pcfg.get("provider", "")
+        key = load_llm_key(provider)
+        if not key:
+            last_err = f"{provider}: 未找到 API key"
+            log(f"⚠️ 片尾识别 {provider}: 无密钥, 跳过")
+            continue
+        try:
+            log(f"片尾视觉识别: {provider} ({pcfg.get('model', '')})...")
+            t0 = time.time()
+            text = _call_vision_once(pcfg, key, ENDING_PROMPT, picks)
+            rec = {"bvid": bvid, "status": "ok", "ver": ENDING_PROMPT_VER,
+                   "provider": provider, "model": pcfg.get("model", ""),
+                   "frames": len(picks), "text": text,
+                   "ts": datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S")}
+            cache[bvid] = rec
+            save_ending_cache(cache)
+            log(f"✅ 片尾识别完成 ({provider}, {time.time() - t0:.1f}s, {len(text)}字)")
+            return rec
+        except Exception as e:
+            last_err = f"{provider}: {e}"
+            log(f"❌ 片尾识别 {provider} 失败: {e}")
+    log(f"⚠️ 片尾识别全部失败: {last_err}")
+    return None
+
+
+def ending_md(rec):
+    """片尾识别结果 -> 报告 markdown 块 (无结果返回空串)"""
+    if not rec or not (rec.get("text") or "").strip():
+        return ""
+    model = rec.get("model", "")
+    return (f"### 📽 片尾画面识别 (视觉: {model})\n\n"
+            f"{rec['text'].strip()}\n")
+
+
+def check_vision(cfg):
+    """预检视觉通道: 打印每个 provider 的可用性 (Actions 里非阻断自检)"""
+    vcfg = cfg.get("vision") or {}
+    if not vcfg.get("enabled", True):
+        log("片尾视觉已禁用 (config.json vision.enabled=false), 跳过预检")
+        return True
+    ok_any = False
+    frames = []
+    for d in sorted(glob.glob(os.path.join(WORKDIR, "data", "frames", "*"))):
+        fs = sorted(glob.glob(os.path.join(d, "*.jpg")))
+        if fs:
+            frames = fs[-1:]
+            break
+    if not frames:
+        # 无现成帧时用一张合成图自检 (640x360, 足够大以通过格式校验)
+        try:
+            from PIL import Image, ImageDraw
+            tmp = os.path.join(WORKDIR, "data", "vision_preflight.png")
+            os.makedirs(os.path.dirname(tmp), exist_ok=True)
+            im = Image.new("RGB", (640, 360), "white")
+            ImageDraw.Draw(im).text((40, 160), "VISION CHECK 2026", fill="black")
+            im.save(tmp)
+            frames = [tmp]
+        except Exception as e:
+            log(f"❌ 无法生成预检图: {e}")
+            return False
+    for pcfg in vision_providers(cfg):
+        provider = pcfg.get("provider", "")
+        key = load_llm_key(provider)
+        if not key:
+            log(f"⏭ 视觉预检 {provider}: 无密钥")
+            continue
+        try:
+            t0 = time.time()
+            text = _call_vision_once(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
+                                     frames[:1])
+            log(f"✅ 视觉预检 {provider} ({pcfg.get('model', '')}) 可用 "
+                f"{time.time() - t0:.1f}s: {text[:60]!r}")
+            ok_any = True
+        except Exception as e:
+            log(f"❌ 视觉预检 {provider} ({pcfg.get('model', '')}) 不可用: {e}")
+    if not ok_any:
+        log("⚠️ 没有可用的视觉 provider (片尾识别将跳过, 主流程不受影响)")
+    return ok_any
+
+
+# =====================================================================
 # 4. AI 分析
 # =====================================================================
 def _call_ollama_native(pcfg, system, user):
@@ -852,7 +1172,11 @@ def _call_dsc(pcfg, token, prompt):
 
 
 def call_llm(cfg, api_key, system, user, dsc_prompt=None):
-    """按顺序尝试 LLM provider; 本地模式(cfg.local_ollama)只走 Ollama qwen2.5:7b"""
+    """按顺序尝试 LLM provider; 本地模式(cfg.local_ollama)只走 Ollama qwen2.5:7b
+
+    文本优先级(固定): opencode-go -> deepseek-chat-cli -> DeepSeek 官方 API
+    (即 cfg.llm -> cfg.llm_cli -> cfg.llm_fallback, 顺序由 providers 列表决定)
+    """
     if cfg.get("local_ollama"):
         providers = [cfg.get("llm_ollama")]
     else:
@@ -922,6 +1246,7 @@ ANALYZE_SYSTEM = """你是资深财经媒体分析助手, 专精解读A股著名
 【市场定性】判断市场定性: 反弹/反转/见顶/调整/防御。注意他的核心框架: "没量=不是反转"。给出判断依据。
 【操作含义】三层面: 方向(看多/看空/观望), 仓位(建议的仓位变化), 风险(需要警惕的风险点)
 【观点连续性】与历史报告对比: 标注 延续/升级/新增/反转。如态度升级(如"警惕→高度警惕")必须重点标出。无历史报告则写"首次记录,无历史对比"。
+若输入附带了【片尾画面(视觉识别)】, 必须把它纳入判断: 在【暗示提取】末尾补一条以"片尾:"开头的条目(说明片尾结束语/卡片透露的信号), 并在【操作含义】中体现。
 
 最后必须另起一行输出: 以上为李大霄个人观点提炼,不构成投资建议"""
 
@@ -937,10 +1262,14 @@ def clean_subtitle_for_prompt(subtitle_text):
     return "，".join(lines)
 
 
-def build_dsc_prompt(video, subtitle_text, history):
+def build_dsc_prompt(video, subtitle_text, history, ending=None):
     """构造给 deepseek-chat-cli 的自然 C 端提示词(保持原输出格式)"""
     date = datetime.datetime.fromtimestamp(video.get("pubdate", 0), CN_TZ).strftime("%Y-%m-%d")
     clean_sub = clean_subtitle_for_prompt(subtitle_text)[:12000]
+    ending_block = ""
+    if ending and (ending.get("text") or "").strip():
+        ending_block = ("\n视频片尾画面(视觉识别, 视频最后几十秒的结束语/卡片):\n"
+                        f"{ending['text'].strip()[:1500]}\n")
     return f"""你好，请以资深财经分析的角度，帮我分析一下李大霄这条视频的内容，并按下面的 Markdown 格式输出（全部使用简体中文）：
 
 视频日期：{date}
@@ -949,7 +1278,7 @@ def build_dsc_prompt(video, subtitle_text, history):
 
 视频字幕（已去掉时间戳）：
 {clean_sub}
-
+{ending_block}
 最近 5 天的历史报告（供你对比观点是否延续/升级/新增/反转）：
 {history or "(无历史报告)"}
 
@@ -957,7 +1286,7 @@ def build_dsc_prompt(video, subtitle_text, history):
 【一句话摘要】用一句话概括本期视频的核心结论
 【核心观点】3-8条, 每条必须包含原文数据(点位/百分比/日期等), 格式: N. 观点 (原文数据: ...)
 【关键数据清单】列出视频中出现的具体数据: 美债收益率/巴菲特指标/见顶时间表/指数点位/成交量等, 格式: - 数据项: 数值
-【暗示提取】李大霄常说"不是推荐", 这实为合规话术下的真实关注点。请逐条列出并判断语境属于"机会暗示"或"风险警示", 每条标注: 🔴警示 / 🟢看多 / ⚪中性 / ⚠️风险
+【暗示提取】李大霄常说"不是推荐", 这实为合规话术下的真实关注点。请逐条列出并判断语境属于"机会暗示"或"风险警示", 每条标注: 🔴警示 / 🟢看多 / ⚪中性 / ⚠️风险; 若上面给了片尾画面, 末尾补一条以"片尾:"开头的条目
 【市场定性】判断市场定性: 反弹/反转/见顶/调整/防御。注意他的核心框架: "没量=不是反转"。给出判断依据。
 【操作含义】三层面: 方向(看多/看空/观望), 仓位(建议的仓位变化), 风险(需要警惕的风险点)。其中方向、仓位、风险里的关键词（如看多/看空/观望、加仓/减仓、进攻/防御等）请用 ~关键词~ 这种波浪号标记标出（例如 ~防御~、~看空~、~减仓~），我会在后处理时转成加粗。
 【观点连续性】与历史报告对比: 标注 延续/升级/新增/反转。如态度升级(如"警惕→高度警惕")必须重点标出。无历史报告则写"首次记录,无历史对比"。
@@ -965,8 +1294,12 @@ def build_dsc_prompt(video, subtitle_text, history):
 最后必须另起一行输出：以上为李大霄个人观点提炼,不构成投资建议"""
 
 
-def analyze_subtitles(cfg, api_key, video, subtitle_text, history):
+def analyze_subtitles(cfg, api_key, video, subtitle_text, history, ending=None):
     date = datetime.datetime.fromtimestamp(video.get("pubdate", 0), CN_TZ).strftime("%Y-%m-%d")
+    ending_block = ""
+    if ending and (ending.get("text") or "").strip():
+        ending_block = ("\n【片尾画面(视觉识别, 视频最后几十秒)】\n"
+                        f"{ending['text'].strip()[:2000]}\n")
     user = f"""【视频信息】
 日期: {date}
 标题: {video['title']}
@@ -974,13 +1307,13 @@ def analyze_subtitles(cfg, api_key, video, subtitle_text, history):
 
 【字幕文本】
 {subtitle_text[:12000]}
-
+{ending_block}
 【历史报告(最近5天, 供观点连续性对比)】
 {history or "(无历史报告)"}
 
 请按模板输出分析。"""
     sys_prompt = ANALYZE_SYSTEM
-    dsc_prompt = build_dsc_prompt(video, subtitle_text, history)
+    dsc_prompt = build_dsc_prompt(video, subtitle_text, history, ending=ending)
     return call_llm(cfg, api_key, sys_prompt, user, dsc_prompt=dsc_prompt)
 
 
@@ -1089,22 +1422,35 @@ def upsert_report(video, section_md, summary_line, list_line):
     return rp
 
 
-def build_section(cfg, video, subtitle_text, analysis, err=None):
+def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None):
     """生成单个视频的报告章节 markdown"""
     head = f"## 视频1:《{video['title']}》 ({video['bvid']})"
+    emd = ending_md(ending).strip()
+
+    def with_tail(text):
+        """片尾块插在免责声明之前, 保证"以上为...不构成投资建议"仍是章节最后一行"""
+        if not emd:
+            return text + "\n"
+        if DISCLAIMER in text:
+            i = text.rfind(DISCLAIMER)
+            return (text[:i].rstrip() + "\n\n" + emd + "\n\n"
+                    + text[i:].strip() + "\n")
+        return text + "\n\n" + emd + "\n"
+
     if err:
-        return (head + f"\n\n> ⚠️ 处理失败: {err}\n", "")
+        return (with_tail(head + f"\n\n> ⚠️ 处理失败: {err}"), "")
     if not subtitle_text:
-        return (head + "\n\n> 无字幕, 跳过分析\n", f"- 视频《{video['title']}》: 无字幕, 跳过分析")
+        note = "无字幕, 跳过分析" + ("; 已单独识别片尾画面" if emd else "")
+        return (with_tail(head + f"\n\n> {note}"),
+                f"- 视频《{video['title']}》: {note}")
     if analysis is None:
-        return (head + "\n\n> ⚠️ AI分析失败, 仅保留字幕\n", "")
+        return (with_tail(head + "\n\n> ⚠️ AI分析失败, 仅保留字幕"), "")
     one_line = ""
     m = re.search(r"【一句话摘要】\s*(.+)", analysis)
     if m:
         one_line = m.group(1).strip()
     summary_line = f"- 视频《{video['title']}》: {one_line}" if one_line else ""
-    body = head + "\n\n" + analysis.strip() + "\n"
-    return (body, summary_line)
+    return (with_tail(head + "\n\n" + analysis.strip()), summary_line)
 
 
 def ensure_disclaimer(analysis):
@@ -1156,11 +1502,15 @@ def process_video(cfg, api_key, video):
     subtitle_text = read_text(sub_path) if os.path.exists(sub_path) else ""
     if not subtitle_text:
         subtitle_text, stats = ocr_video(cfg, mp4, bvid)
-        if not subtitle_text:
-            log("无字幕, 跳过分析")
-            section, sl = build_section(cfg, video, "", None, None)
-            rp = upsert_report(video, section, sl, list_line(video))
-            return (True, rp, "无字幕,跳过分析")
+
+    # 片尾画面识别 (v4-flash 视觉; 放在抽帧之后可直接复用帧; 失败不影响主流程)
+    ending = read_ending_hint(cfg, video, mp4)
+
+    if not subtitle_text:
+        log("无字幕, 跳过分析")
+        section, sl = build_section(cfg, video, "", None, None, ending=ending)
+        rp = upsert_report(video, section, sl, list_line(video))
+        return (True, rp, "无字幕,跳过分析")
 
     # 分析
     history = load_history(cfg)
@@ -1169,7 +1519,8 @@ def process_video(cfg, api_key, video):
     for attempt in range(1, cfg["llm_retries"] + 1):
         try:
             log(f"AI分析中 (第{attempt}次)...")
-            analysis = analyze_subtitles(cfg, api_key, video, subtitle_text, history)
+            analysis = analyze_subtitles(cfg, api_key, video, subtitle_text, history,
+                                         ending=ending)
             # 防御: 任何 provider 返回超时/未获取回答都视为失败, 不写入报告
             if "超时未获取回答" in analysis or "未获取回答" in analysis:
                 raise ValueError("LLM 返回超时未获取回答")
@@ -1183,13 +1534,13 @@ def process_video(cfg, api_key, video):
     if analysis is None:
         note = f"AI分析失败: {last_err}"
         log("❌ " + note)
-        section, sl = build_section(cfg, video, subtitle_text, None, None)
+        section, sl = build_section(cfg, video, subtitle_text, None, None, ending=ending)
         section = section + f"\n> ⚠️ AI分析失败: {last_err}\n"
         rp = upsert_report(video, section, sl, list_line(video))
         return (False, rp, note)
 
     # 写报告
-    section, summary_line = build_section(cfg, video, subtitle_text, analysis, None)
+    section, summary_line = build_section(cfg, video, subtitle_text, analysis, None, ending=ending)
     rp = upsert_report(video, section, summary_line, list_line(video))
     log(f"✅ 视频处理完成: {bvid}")
     return (True, rp, "ok")
@@ -1256,9 +1607,13 @@ def main():
     ap.add_argument("--uid", default=None, help="UP主UID")
     ap.add_argument("--limit", type=int, default=None, help="每次最多检查的视频数")
     ap.add_argument("--config", default=None, help="配置文件路径")
+    ap.add_argument("--check-vision", action="store_true",
+                    help="仅自检片尾视觉模型可用性后退出(不下载/不分析)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
+    if args.check_vision:
+        return 0 if check_vision(cfg) else 1
     if args.uid:
         cfg["uid"] = args.uid
     if args.limit:

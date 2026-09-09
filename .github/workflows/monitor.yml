@@ -69,6 +69,15 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
+      - name: Vision preflight (片尾视觉通道自检, 不阻断)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          PYTHONIOENCODING: utf-8
+        run: python monitor.py --check-vision
+
       - name: Run unified monitor (local/cloud adaptive)
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}

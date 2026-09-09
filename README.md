@@ -24,7 +24,7 @@
 > 他满嘴 **"不是推荐"**,你猜不透真实意图;
 > 他的观点天天变,**前后矛盾你记不住**。
 
-这个项目让 **AI 替你盯着他**:新视频一发布,自动下载、自动识别字幕、自动拆解话术,生成一份**《李大霄话术解码日报》**——核心观点、关键数据、暗示提取、市场定性、观点连续性,打开就一目了然。
+这个项目让 **AI 替你盯着他**:新视频一发布,自动下载、自动识别字幕、自动拆解话术,生成一份**《李大霄话术解码日报》**——核心观点、关键数据、暗示提取、**片尾暗示(视觉识别)**、市场定性、观点连续性,打开就一目了然。
 
 > 📊 **最新日报**: [查看 latest.md](./docs/reports/latest.md) · 📅 [全部日报索引](./docs/reports/index.md) · 📚 [周度总结](./docs/reports/weekly.md)
 
@@ -38,6 +38,8 @@
 | 基于 bilidown CLI(内置 wbi 签名 + 412 反爬),状态文件对比,无新视频秒退 | 480P mp4 自动下载,失败自动重试;登录 cookies 解锁高清 | ffmpeg 抽帧 + RapidOCR,字幕带自动探测,去重/降噪;RTX 显卡 DirectML 加速 6-8 倍 |
 | 🤖 **AI 话术解码** | 📄 **每日日报** | ☁️ **云端全自动** |
 | AI 拆解:核心观点 / 关键数据 / **暗示提取(不是推荐=真实关注点)** / 市场定性 / 操作含义 / **观点连续性(升级/反转一眼看出)** | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要 | GitHub Actions 定时运行(每天 14:40 / 20:00),报告自动提交,电脑不用开机 |
+| 🎬 **片尾暗示识别** | 🖼️ **视觉模型读屏** | 🧊 **省 token + 兜底** |
+| 片尾固定卡片(结束语 / 荐书卡 / 合规声明 / 数据面板)整屏密集文字 OCR 会丢,改用**视觉模型**读,报告单列【片尾暗示】 | `deepseek-v4-flash-vision-exp` 多图识别;帧平均哈希去重 + 降采样,一帧约 300 token | 结果缓存 `state/ending_hints.json` 随仓库同步;OpenCode 额度用尽自动切 DeepSeek 官方;视觉不可用时只跳过该小节 |
 
 **流程示意**
 
@@ -89,6 +91,7 @@ python _setup/login_wait.py     # 浏览器打开二维码, B站App扫码
 ```bash
 python monitor.py              # 无新视频秒退; 有新视频自动处理
 python monitor.py --force      # 强制重新处理最新视频
+python monitor.py --check-vision   # 自检片尾视觉通道(不下载不分析)
 ```
 
 > 💡 更多用法:批量补全历史字幕 `python batch_subtitles.py` · 发布规律分析 `python _setup/analyze_pubtimes.py` · 本地定时任务 `powershell -File _setup/install_schedule.ps1`
@@ -118,15 +121,16 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 - 每天 **北京时间 14:40 / 20:00** 自动运行(也可手动 `Run workflow`)
 - 报告自动提交到 `docs/reports/`(日报全部保留)+ 上传 artifact
 - 状态与字幕通过 Actions 缓存持久化,无新视频秒退,不重复分析
+- 片尾视觉通道有**非阻断预检**(`python monitor.py --check-vision`):额度/密钥问题会提前打在日志里,失败也只跳过【片尾暗示】小节,不影响主流程
 
 ---
 
 ## 📂 目录结构
 
 ```
-├── monitor.py              # 主脚本 (检测/下载/OCR/分析/报告)
+├── monitor.py              # 主脚本 (检测/下载/OCR/片尾视觉/分析/报告)
 ├── batch_subtitles.py      # 批量字幕提取 (全量历史视频, 断点续传)
-├── config.json             # 配置 (UID/OCR/LLM)
+├── config.json             # 配置 (UID/OCR/LLM/片尾视觉)
 ├── requirements.txt        # Python 依赖
 ├── _setup/
 │   ├── login_wait.py       # B站扫码登录辅助
@@ -135,6 +139,7 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 │   ├── analyze_pubtimes.py # 发布规律分析
 │   └── weekly_summary.py   # 周度总结生成
 ├── docs/reports/           # 自动生成的日报 (CI 提交)
+├── state/                  # 状态: last_bvid / processed / 片尾识别缓存 (入库同步)
 ├── data/                   # 状态/字幕/帧 (运行时生成, 不入库)
 └── reports/                # 本地日报 (不入库)
 ```
@@ -145,6 +150,9 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 
 **Q: "不是推荐"到底是什么?**
 A: 李大霄的合规话术。本项目 AI 会专门提取这类暗示,标注语境(机会暗示/风险警示)和情绪(🔴警示/🟢看多/⚪中性/⚠️风险)。
+
+**Q: 片尾暗示是怎么读的?为什么不用 OCR?**
+A: 片尾是整屏密集文字(合规声明/荐书卡/数据面板),OCR 的"数字过多=噪声"过滤规则会把它们丢掉。所以单独用 **v4-flash 视觉模型**读片尾画面:ffmpeg 取最后 45 秒的帧 → 平均哈希去重 → 最多 4 帧发给模型 → 输出【片尾口语/卡片/数据/暗示】四行,写进报告并参与 AI 分析。识别结果按 BV 缓存到 `state/ending_hints.json`,同一视频不重复调用。不想用可以 `config.json` 里设 `"vision": {"enabled": false}` 关闭(主流程不受影响)。
 
 **Q: 为什么用 OCR 而不是官方字幕?**
 A: 多数视频无官方字幕,且硬字幕(画面内文字)才是他真正展示的内容——点位、百分比、表格全在画面上。
@@ -162,7 +170,9 @@ A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主, 文本 `deepseek-v4-flash` + 视觉 `deepseek-v4-flash-vision-exp`) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底, 视觉同模型) · GitHub Actions(定时/部署)
+
+> **调用优先级**:文本分析 `opencode-go → deepseek-chat-cli → DeepSeek 官方 API`;片尾识图 `opencode-go → DeepSeek 官方 API`(网页版 CLI 不支持图片输入,识图不经过它)。每一级失败/无密钥自动降到下一级,日志里能看到实际用了谁。
 
 ## ⚖️ 免责声明
 
