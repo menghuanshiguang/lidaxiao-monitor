@@ -1,0 +1,44 @@
+name: Diag Download (临时诊断)
+
+# 一次性诊断: 复刻 monitor.py 的 bilidown 下载调用, 抓全 stdout/stderr。
+# 用完即删。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/diag-download.yml'
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Clone bilidown CLI
+        run: git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
+
+      - name: Write Bilibili cookies (same as monitor.yml)
+        shell: pwsh
+        env:
+          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
+        run: |
+          if (-not $env:COOKIES_B64) { Write-Error "缺少 BILIBILI_COOKIES_B64" }
+          $bytes = [Convert]::FromBase64String($env:COOKIES_B64)
+          New-Item -ItemType Directory -Force data | Out-Null
+          New-Item -ItemType Directory -Force "$env:USERPROFILE\.cache" | Out-Null
+          [IO.File]::WriteAllBytes("$env:USERPROFILE\.cache\bilibili-login-cookies.txt", $bytes)
+          [IO.File]::WriteAllBytes("data\cookies.txt", $bytes)
+          Write-Host "cookies 写入完成 ($($bytes.Length) bytes)"
+
+      - name: Diagnose download
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python diag_download.py
