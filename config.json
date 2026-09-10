@@ -9,7 +9,7 @@
   "llm": {
     "provider": "opencode-go",
     "base_url": "https://opencode.ai/zen/go/v1",
-    "model": "deepseek-v4-flash",
+    "model": "deepseek-flash",
     "reasoningEffort": "max",
     "temperature": 0.3,
     "max_tokens": 8000
@@ -36,7 +36,8 @@
   "llm_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",
-    "model": "deepseek-chat",
+    "model": "deepseek-flash",
+    "reasoningEffort": "medium",
     "temperature": 0.3,
     "max_tokens": 4000
   },
@@ -44,7 +45,7 @@
     "enabled": true,
     "provider": "opencode-go",
     "base_url": "https://opencode.ai/zen/go/v1",
-    "model": "deepseek-v4-flash-vision-exp",
+    "model": "deepseek-flash",
     "max_tokens": 6000,
     "timeout": 240,
     "tail_seconds": 45,
@@ -55,7 +56,7 @@
   "vision_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",
-    "model": "deepseek-v4-flash-vision-exp",
+    "model": "deepseek-flash",
     "max_tokens": 6000,
     "timeout": 240
   }

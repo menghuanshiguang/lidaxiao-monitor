@@ -7,9 +7,9 @@
   1. 更新检测  : bilidown space 获取 UP主最新视频, 与 data/last_bvid.txt 对比
   2. 视频下载  : bilidown dl 下载 480P mp4 (失败重试1次)
   3. 字幕提取  : ffmpeg 抽帧 + RapidOCR 硬字幕识别 (自适应字幕区域 + 相邻帧去重)
-  4. 片尾识别  : ffmpeg 取片尾帧 + deepseek-v4-flash 视觉模型读"片尾暗示"
+  4. 片尾识别  : ffmpeg 取片尾帧 + deepseek-flash 视觉模型读"片尾暗示"
                 (结束语/荐书卡/合规声明卡/数据面板; OCR 会丢弃的整屏密集文字)
-  5. AI 分析   : OpenCode Zen Go API (deepseek-v4-flash) 对字幕+片尾做"李大霄话术解码"分析
+  5. AI 分析   : OpenCode Zen Go API (deepseek-flash) 对字幕+片尾做"李大霄话术解码"分析
   6. 每日报告  : reports/YYYY-MM-DD.md (当天已有报告则追加)
   7. 状态幂等  : data/last_bvid.txt + data/processed.txt + 并发锁
                 (片尾识别结果缓存于 state/ending_hints.json, 随仓库同步)
@@ -92,16 +92,19 @@ def load_config(path=None):
         "llm": {
             "provider": "opencode-go",          # OpenCode Zen Go (https://opencode.ai/zen/go)
             "base_url": "https://opencode.ai/zen/go/v1",
-            "model": "deepseek-v4-flash",
-            "reasoningEffort": "max",           # 推理等级: off/minimal/low/medium/high/max (deepseek-v4-flash 支持 high/max)
+            "model": "deepseek-flash",
+            "reasoningEffort": "max",           # 思考强度: low/high/max (旧值 minimal/medium/xhigh/ultra 会被官方映射)
             "temperature": 0.3,
             "max_tokens": 8000,
         },
         "llm_fallback": {                       # OpenCode Go 失败时的 DeepSeek 兜底
             "provider": "deepseek",
             "base_url": "https://api.deepseek.com",
-            "model": "deepseek-chat",
-            "temperature": 0.3,
+            # 官方最新模型名: deepseek-flash (DeepSeek-V4.1-Flash)。
+            # 旧名 deepseek-chat / deepseek-v4-flash 已下线, 请求会被路由到 V4.1 Flash。
+            "model": "deepseek-flash",
+            "reasoningEffort": "medium",        # 思考强度: low/high/max (旧名 medium 会被抬到 high)
+            "temperature": 0.3,                 # 思考模式下官方 API 会忽略该参数
             "max_tokens": 4000,
         },
         "llm_cli": {                            # 第二兜底: deepseek-chat-cli (DeepSeek 网页版登录 token)
@@ -119,12 +122,12 @@ def load_config(path=None):
             "max_tokens": 8000,
             "timeout": 600,
         },
-        "vision": {                             # 片尾画面识别 (deepseek-v4-flash 视觉)
+        "vision": {                             # 片尾画面识别 (deepseek-flash 视觉能力)
             "enabled": True,
             "provider": "opencode-go",
             "base_url": "https://opencode.ai/zen/go/v1",
-            "model": "deepseek-v4-flash-vision-exp",
-            "max_tokens": 6000,                 # 推理模型: 需留足思考token, 否则返回空
+            "model": "deepseek-flash",          # 官方唯一支持图像理解的模型
+            "max_tokens": 6000,                 # 思考模式下需留足思考token, 否则返回空
             "timeout": 240,
             "tail_seconds": 45,                 # 片尾扫描窗口(秒)
             "max_frames": 6,                    # 送模型的最大帧数(覆盖不同场景)
@@ -134,7 +137,7 @@ def load_config(path=None):
         "vision_fallback": {                    # 视觉兜底: DeepSeek 官方 API (同一模型)
             "provider": "deepseek",
             "base_url": "https://api.deepseek.com",
-            "model": "deepseek-v4-flash-vision-exp",
+            "model": "deepseek-flash",
             "max_tokens": 6000,
             "timeout": 240,
         },
@@ -740,7 +743,7 @@ def merge_ts_lines(a, b):
 
 
 # =====================================================================
-# 3.5 片尾画面识别 (deepseek-v4-flash 视觉能力)
+# 3.5 片尾画面识别 (deepseek-flash 视觉能力)
 #     李大霄视频片尾固定是"卡片区": 口播结束语 + 荐书卡 + 合规声明卡(+偶尔数据面板),
 #     这类整屏密集文字会被 OCR 的字数/数字过滤规则丢弃, 因此单独用视觉模型读片尾。
 # =====================================================================
@@ -894,6 +897,7 @@ def vision_providers(cfg):
 def _call_vision_once(pcfg, api_key, prompt, images):
     """向一个视觉端点发多图请求, 返回文本"""
     import requests
+    _warn_model(pcfg)
     url = pcfg["base_url"].rstrip("/") + "/chat/completions"
     content = [{"type": "text", "text": prompt}]
     for p in images:
@@ -915,12 +919,15 @@ def _call_vision_once(pcfg, api_key, prompt, images):
     payload = dict(base, max_tokens=pcfg.get("max_tokens", 6000))
     if pcfg.get("temperature") is not None:
         payload["temperature"] = pcfg["temperature"]
+    # 思考模式参数统一由 _apply_thinking 决定 (官方: thinking + reasoning_effort)
+    _apply_thinking(payload, pcfg)
     j = post(payload)
     ch = (j.get("choices") or [{}])[0]
     text = (ch.get("message", {}).get("content") or "").strip()
     if not text:
-        # 推理型视觉模型: 思考 token 吃满 max_tokens 时会返回空内容 -> 关思考重试一次
-        log("⚠️ 视觉模型返回空内容(推理token可能耗尽), 关闭思考重试...")
+        # deepseek-flash 默认开启思考: 思考 token 吃满 max_tokens 时会返回空内容
+        # -> 显式关闭思考重试一次
+        log("⚠️ 视觉模型返回空内容(思考token可能耗尽), 关闭思考重试...")
         try:
             j2 = post(dict(base, max_tokens=2000, thinking={"type": "disabled"}))
             text = ((j2.get("choices") or [{}])[0].get("message", {}).get("content") or "").strip()
@@ -1085,11 +1092,55 @@ def _call_ollama_native(pcfg, system, user):
     return (j.get("message", {}).get("content") or "").strip()
 
 
+# 官方已下线的模型名 -> 现行模型名 (旧名仍可调用, 但请求由 V4.1 Flash 承接)
+RETIRED_MODEL_MAP = {
+    "deepseek-chat": "deepseek-flash",
+    "deepseek-reasoner": "deepseek-flash",
+    "deepseek-v4-flash": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    "deepseek-v4-flash-free": "deepseek-flash",
+}
+# 思考强度取值; 官方另接受 minimal/medium/xhigh/ultra (映射到 low/high/max)
+THINKING_EFFORTS = ("low", "high", "max")
+
+
+def _warn_model(pcfg):
+    """旧模型名提醒(不阻断): 官方已下线这些名字, 请求会被路由到 V4.1 Flash"""
+    m = (pcfg.get("model") or "").strip()
+    if m in RETIRED_MODEL_MAP:
+        log(f"⚠️ 模型名 `{m}` 已下线, 建议改为 `{RETIRED_MODEL_MAP[m]}` (--config 或 config.json)")
+
+
+def _apply_thinking(payload, pcfg):
+    """思考模式参数 (官方文档: OpenAI 格式 {"thinking":{"type":"enabled/disabled"}}
+    + {"reasoning_effort":"low/high/max"})。
+
+    只有配了 reasoningEffort 才显式打开思考(并省略 temperature —— 思考模式下
+    官方 API 不支持 temperature, 传了也不生效)。没配时原样保留, 保证
+    OpenCode Zen Go / Ollama 等旧通道行为完全不变。
+    """
+    effort = (pcfg.get("reasoningEffort") or "").strip()
+    if not effort:
+        return payload
+    if effort in ("off", "none", "disabled", "false"):
+        payload["thinking"] = {"type": "disabled"}
+        payload.setdefault("temperature", pcfg.get("temperature", 0.3))
+        return payload
+    if effort not in THINKING_EFFORTS:
+        # 旧值兼容: minimal/medium/xhigh/ultra 官方会自动映射, 这里仅提示
+        log(f"ℹ️ reasoningEffort=`{effort}` 非官方新取值 {THINKING_EFFORTS}, 官方会自动映射")
+    payload["thinking"] = {"type": "enabled"}
+    payload["reasoning_effort"] = effort
+    payload.pop("temperature", None)
+    return payload
+
+
 def _call_llm_once(pcfg, api_key, system, user):
     """向单个 LLM provider 发起一次 Chat Completions 请求"""
     if pcfg.get("provider") == "ollama":
         return _call_ollama_native(pcfg, system, user)
     import requests
+    _warn_model(pcfg)
     url = pcfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": pcfg["model"],
@@ -1100,6 +1151,9 @@ def _call_llm_once(pcfg, api_key, system, user):
         "max_tokens": pcfg.get("max_tokens", 4000),
         "stream": False,
     }
+    # 先按普通模式放 temperature, 再由思考模式参数决定是否移除
+    payload["temperature"] = pcfg.get("temperature", 0.3)
+    _apply_thinking(payload, pcfg)
     # Ollama: 透传 MoE/批处理/缓存参数, 等价于 llama-server 的对应 flag
     if pcfg.get("provider") == "ollama":
         ollama_options = {}
@@ -1115,14 +1169,6 @@ def _call_llm_once(pcfg, api_key, system, user):
                 ollama_options[api_key] = val
         if ollama_options:
             payload["options"] = ollama_options
-    effort = (pcfg.get("reasoningEffort") or "").strip()
-    if effort:
-        # 推理模型 (如 deepseek-v4-flash): OpenCode Zen Go 的 deepseek 思维格式
-        payload["thinking"] = {"type": "enabled"}
-        payload["reasoning_effort"] = effort
-        # 思维链模式不接受 temperature, 省略以免被端点拒绝
-    else:
-        payload["temperature"] = pcfg.get("temperature", 0.3)
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -1583,7 +1629,7 @@ def process_video(cfg, api_key, video):
     if not subtitle_text:
         subtitle_text, stats = ocr_video(cfg, mp4, bvid)
 
-    # 片尾画面识别 (v4-flash 视觉; 放在抽帧之后可直接复用帧; 失败不影响主流程)
+    # 片尾画面识别 (deepseek-flash 视觉; 放在抽帧之后可直接复用帧; 失败不影响主流程)
     ending = read_ending_hint(cfg, video, mp4)
 
     if not subtitle_text:

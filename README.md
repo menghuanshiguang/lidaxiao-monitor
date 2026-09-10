@@ -39,7 +39,7 @@
 | 🤖 **AI 话术解码** | 📄 **每日日报** | ☁️ **云端全自动** |
 | AI 拆解:核心观点 / 关键数据 / **暗示提取(不是推荐=真实关注点)** / 市场定性 / 操作含义 / **观点连续性(升级/反转一眼看出)** | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要 | GitHub Actions 定时运行(每天 14:40 / 20:00),报告自动提交,电脑不用开机 |
 | 🎬 **片尾暗示识别** | 🖼️ **视觉模型读屏** | 🧊 **选帧 + 兜底** |
-| 片尾卡片(结束语 / 荐书卡 / 合规声明 / 数据面板)+**图形动画**(地球≈地球顶、钻石≈钻石底、婴儿底等标志性比喻)——OCR 全丢,改用**视觉模型**读,报告单列【片尾暗示】 | `deepseek-v4-flash-vision-exp` 多图识别;16×16 签名去重 + **最远点采样**选帧,覆盖口播/卡片/地球动画/声明等不同场景 | 结果缓存 `state/ending_hints.json` 随仓库同步;OpenCode 额度用尽自动切 DeepSeek 官方;视觉不可用时只跳过该小节 |
+| 片尾卡片(结束语 / 荐书卡 / 合规声明 / 数据面板)+**图形动画**(地球≈地球顶、钻石≈钻石底、婴儿底等标志性比喻)——OCR 全丢,改用**视觉模型**读,报告单列【片尾暗示】 | `deepseek-flash` 多图识别;16×16 签名去重 + **最远点采样**选帧,覆盖口播/卡片/地球动画/声明等不同场景 | 结果缓存 `state/ending_hints.json` 随仓库同步;OpenCode 额度用尽自动切 DeepSeek 官方;视觉不可用时只跳过该小节 |
 
 **流程示意**
 
@@ -104,9 +104,9 @@ python monitor.py --check-vision   # 自检片尾视觉通道(不下载不分析
 
 | Secret | 说明 |
 |--------|------|
-| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析主通道,模型 `deepseek-v4-flash`,推理 `max`) |
+| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析主通道,模型 `deepseek-flash`,思考强度 `max`) |
 | `DSV_TOKEN` | DeepSeek 网页版登录 token(第二兜底 `deepseek-chat-cli` 使用) |
-| `DEEPSEEK_API_KEY` | DeepSeek 官方 API 密钥(最后兜底) |
+| `DEEPSEEK_API_KEY` | DeepSeek 官方 API 密钥(最后兜底,模型 `deepseek-flash`) |
 | `BILIBILI_COOKIES_B64` | B站登录 cookies(base64,由 `data/cookies.txt` 转换) |
 
 > `deepseek-chat-cli` 已提供公开仓库(不含 token),Actions 直接公开克隆,无需 PAT。
@@ -122,6 +122,34 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 - 报告自动提交到 `docs/reports/`(日报全部保留)+ 上传 artifact
 - 状态与字幕通过 Actions 缓存持久化,无新视频秒退,不重复分析
 - 片尾视觉通道有**非阻断预检**(`python monitor.py --check-vision`):额度/密钥问题会提前打在日志里,失败也只跳过【片尾暗示】小节,不影响主流程
+
+---
+
+## 🧠 模型选择 (2026-09 更新)
+
+DeepSeek 官方已启用新模型名([官方文档](https://api-docs.deepseek.com/zh-cn/)),本项目已全部切换:
+
+| 用途 | 模型名 | 说明 |
+|------|--------|------|
+| 文本分析(主) | `deepseek-flash` | OpenCode Zen Go 通道 |
+| 文本分析(兜底) | `deepseek-flash` | DeepSeek 官方 `https://api.deepseek.com` |
+| 片尾视觉 | `deepseek-flash` | **官方唯一支持图像理解的模型**(`deepseek-v4-pro` 不支持图像) |
+
+**官方当前可用模型**(`GET /models`):`deepseek-flash`(= DeepSeek-V4.1-Flash)、`deepseek-v4-pro`(= DeepSeek-V4-Pro-0813)。
+
+> ⚠️ **旧模型名已下线**:`deepseek-chat`、`deepseek-reasoner`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`
+> 仍可调用,但对应模型已下线,请求会由 **V4.1 Flash** 承接并按 Flash 价格计费。所以本项目已改用 `deepseek-flash`。
+> 官方计划 **2026-09-14 12:00 起**把 `deepseek-v4-pro` 的请求也路由到 V4.1 Flash。
+
+**思考模式**:`deepseek-flash` 默认开启思考,思考强度通过 `reasoning_effort` 控制(取值 `low`/`high`/`max`,
+旧值 `minimal`/`medium`/`xhigh`/`ultra` 会被官方映射)。在 `config.json` 里用 `reasoningEffort` 配置,留空即关闭思考模式。
+
+```jsonc
+"llm_fallback":  { "provider": "deepseek", "model": "deepseek-flash", "reasoningEffort": "medium" },
+"vision_fallback": { "provider": "deepseek", "model": "deepseek-flash" }
+```
+
+> 想省钱可以把兜底模型换成 `deepseek-v4-pro`,或在空闲时段(非周一至周五 9:00-12:00 / 14:00-18:00)运行,价格为高峰时段的一半。
 
 ---
 
@@ -152,7 +180,7 @@ gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
 A: 李大霄的合规话术。本项目 AI 会专门提取这类暗示,标注语境(机会暗示/风险警示)和情绪(🔴警示/🟢看多/⚪中性/⚠️风险)。
 
 **Q: 片尾暗示是怎么读的?为什么不用 OCR?**
-A: 片尾有两类东西 OCR 都拿不到:① 整屏密集文字(合规声明/荐书卡/数据面板),会被 OCR 的"数字过多=噪声"规则丢掉;② **图形动画**(如地球/星球≈"地球顶"、钻石≈"钻石底"、婴儿底等李大霄标志性比喻)。所以单独用 **v4-flash 视觉模型**读片尾画面:ffmpeg 取最后 45 秒的帧 → 16×16 签名去重 + **最远点采样**选出最多 6 帧(保证覆盖口播结束语 / 荐书卡 / 地球动画 / 声明卡等不同场景,均匀取样会整段漏掉)→ 输出【片尾口语/卡片/画面/数据/暗示】五行,写进报告并参与 AI 分析。识别结果按 BV 缓存到 `state/ending_hints.json`,同一视频不重复调用。不想用可以 `config.json` 里设 `"vision": {"enabled": false}` 关闭(主流程不受影响)。
+A: 片尾有两类东西 OCR 都拿不到:① 整屏密集文字(合规声明/荐书卡/数据面板),会被 OCR 的"数字过多=噪声"规则丢掉;② **图形动画**(如地球/星球≈"地球顶"、钻石≈"钻石底"、婴儿底等李大霄标志性比喻)。所以单独用 **`deepseek-flash` 视觉模型**读片尾画面:ffmpeg 取最后 45 秒的帧 → 16×16 签名去重 + **最远点采样**选出最多 6 帧(保证覆盖口播结束语 / 荐书卡 / 地球动画 / 声明卡等不同场景,均匀取样会整段漏掉)→ 输出【片尾口语/卡片/画面/数据/暗示】五行,写进报告并参与 AI 分析。识别结果按 BV 缓存到 `state/ending_hints.json`,同一视频不重复调用。不想用可以 `config.json` 里设 `"vision": {"enabled": false}` 关闭(主流程不受影响)。
 
 **Q: 视频下载不完整会怎样?**
 A: 已加下载完整性校验:用 B站元数据时长对比 `ffprobe` 实际时长,明显偏短(默认 <97%)就自动重下一次;重下仍残缺则在报告里打 `⚠️ 视频下载不完整` 提示。这条校验是必需的——截断的 mp4 容器头仍报完整时长,ffmpeg 会提前结束,抽帧变少,片尾窗口会落在视频中间,导致读不到真正的片尾(以及结论不全)。
@@ -173,7 +201,7 @@ A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主, 文本 `deepseek-v4-flash` + 视觉 `deepseek-v4-flash-vision-exp`) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底, 视觉同模型) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主, 文本+视觉 `deepseek-flash`) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底, 视觉同模型) · GitHub Actions(定时/部署)
 
 > **调用优先级**:文本分析 `opencode-go → deepseek-chat-cli → DeepSeek 官方 API`;片尾识图 `opencode-go → DeepSeek 官方 API`(网页版 CLI 不支持图片输入,识图不经过它)。每一级失败/无密钥自动降到下一级,日志里能看到实际用了谁。
 
