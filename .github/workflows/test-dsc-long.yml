@@ -1,0 +1,46 @@
+name: Test dsc Long Prompt (一次性, 自删)
+
+# 一次性测试: 真实长度 prompt 下 dsc 通道是否可用、输出是否保持表结构。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/test-dsc-long.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python deps
+        run: pip install --disable-pip-version-check -r requirements.txt
+        shell: pwsh
+
+      - name: Install deepseek-chat-cli deps
+        run: |
+          git clone --depth 1 https://github.com/menghuanshiguang/deepseek-chat-cli.git _repo/deepseek-chat-cli
+          pip install --disable-pip-version-check -r _repo/deepseek-chat-cli/requirements.txt
+        shell: pwsh
+
+      - name: Test dsc long prompt
+        env:
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
+          PYTHONIOENCODING: utf-8
+        run: python test_dsc_long.py
+        shell: pwsh
+
+      - name: 自删(无论成败都执行)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python _selfdel4.py
+        shell: pwsh
