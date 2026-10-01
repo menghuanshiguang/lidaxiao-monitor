@@ -435,12 +435,19 @@ def publish_reports(args, tag="local"):
         log("没有 reports/ 目录, 跳过发布")
         return
     baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=2)
+    # force 处理旧视频时报告按视频发布日命名(早于 baseline), 但本 run 刚写过 -> 也要发布
+    mtime_cut = time.time() - 6 * 3600
 
     def is_recent(name):
         try:
             d = datetime.datetime.strptime(name[:10], "%Y-%m-%d").date()
-            return d >= baseline
         except ValueError:
+            return False
+        if d >= baseline:
+            return True
+        try:
+            return os.path.getmtime(os.path.join(reports_dir, name)) >= mtime_cut
+        except OSError:
             return False
 
     daily = sorted(f for f in os.listdir(reports_dir)
