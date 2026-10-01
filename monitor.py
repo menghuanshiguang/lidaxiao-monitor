@@ -27,6 +27,7 @@ import argparse
 import base64
 import datetime
 import glob
+import hashlib
 import io
 import json
 import os
@@ -89,6 +90,15 @@ def load_config(path=None):
         "frame_interval": 0.0,          # 0=自适应 (时长/240, 限1~4秒)
         "ocr_confidence": 0.5,
         "min_subtitle_chars": 30,       # 字幕文本少于该长度视为"无字幕"
+        "llm_free": {                           # 免费层: OpenCode Zen 免密车道 (无需任何 key)
+            "enabled": True,
+            "provider": "opencode-zen-free",    # 走 Zen 公共免密网关, 固定 Bearer public + OpenCode 指纹头
+            "base_url": "https://opencode.ai/zen/v1",
+            "model": "mimo-v2.6-flash-free",
+            "temperature": 0.3,
+            "max_tokens": 32768,                # 该车道 reasoning_effort 是空操作, "max"=把 max_tokens 顶满
+            "timeout": 300,
+        },
         "llm": {
             "provider": "opencode-go",          # OpenCode Zen Go (https://opencode.ai/zen/go)
             "base_url": "https://opencode.ai/zen/go/v1",
@@ -122,6 +132,14 @@ def load_config(path=None):
             "max_tokens": 8000,
             "timeout": 600,
         },
+        "vision_free": {                        # 片尾识别第一层: MiMo 免费视觉车道 (无 key)
+            "enabled": True,
+            "provider": "opencode-zen-free",
+            "base_url": "https://opencode.ai/zen/v1",
+            "model": "mimo-v2.6-flash-free",
+            "max_tokens": 8000,                 # 思考不可关, 需留足思考 token
+            "timeout": 240,
+        },
         "vision": {                             # 片尾画面识别 (deepseek-flash 视觉能力)
             "enabled": True,
             "provider": "opencode-go",
@@ -149,10 +167,12 @@ def load_config(path=None):
         with open(p, "r", encoding="utf-8") as f:
             user = json.load(f)
         cfg.update(user)
+        cfg["llm_free"].update(user.get("llm_free", {}))
         cfg["llm"].update(user.get("llm", {}))
         cfg["llm_fallback"].update(user.get("llm_fallback", {}))
         cfg["llm_cli"].update(user.get("llm_cli", {}))
         cfg["llm_ollama"].update(user.get("llm_ollama", {}))
+        cfg["vision_free"].update(user.get("vision_free", {}))
         cfg["vision"].update(user.get("vision", {}))
         cfg["vision_fallback"].update(user.get("vision_fallback", {}))
     # 本地模式开关: 环境变量 LIDAXIAO_LOCAL=1 或 config.json local_ollama=true
@@ -168,6 +188,8 @@ LLM_PROVIDER_KEY_ENVS = {
     "deepseek-chat-cli": ("DSV_TOKEN", "DEEPSEEK_CHAT_CLI_TOKEN"),
 }
 LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
+# OpenCode Zen 免密车道: 固定公开 token, 不需要任何环境变量
+FREE_PROVIDER = "opencode-zen-free"
 
 
 def _env_or_envfile(name):
@@ -187,6 +209,8 @@ def _env_or_envfile(name):
 
 def load_llm_key(provider=None):
     """密钥优先级: 环境变量 > .env 文件; provider=None 时按 OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY 顺序"""
+    if provider == FREE_PROVIDER:
+        return "public"        # 免密车道固定 token, 走 OpenCode 指纹头校验
     names = LLM_PROVIDER_KEY_ENVS.get(provider, LLM_KEY_ENVS) if provider else LLM_KEY_ENVS
     for name in names:
         v = _env_or_envfile(name)
@@ -887,15 +911,83 @@ def frame_data_url(path, max_width=1280, quality=85):
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+# =====================================================================
+# OpenCode Zen 免密车道 (Bearer public + OpenCode 客户端指纹 + 流式)
+# 协议实测自 zouyuxuan122/dsh-our-free-model:
+#   - 非流式必挂(500/403), 只有 stream:true 稳定 200
+#   - body 必须带 bash/glob/grep/read 四个最小 tools + tool_choice:none, 否则 403
+#   - reasoning_effort 发了是空操作, 思考与正文抢 max_tokens -> 预算靠 max_tokens 顶
+#   - 免费额度按 session 计: ses_/msg_ id 用 sha256 稳定派生, 不能每请求新铸
+# =====================================================================
+FREE_B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+FREE_DECOY_TOOLS = [
+    {"type": "function", "function": {"name": n, "description": "d",
+     "parameters": {"type": "object", "properties": {}}}}
+    for n in ("bash", "glob", "grep", "read")
+]
+
+
+def _free_derive_id(prefix, seed):
+    """sha256 派生稳定 id: 前6字节hex + 后14字节base62 (与插件同构)"""
+    h = hashlib.sha256(seed.encode("utf-8")).digest()
+    return prefix + h[:6].hex() + "".join(FREE_B62[b % 62] for b in h[6:20])
+
+
+def _free_lane_post(pcfg, payload, timeout):
+    """免密车道流式 POST, 返回拼接好的正文 (跳过 reasoning 增量)"""
+    import requests
+    seed = "lidaxiao-monitor\0" + (pcfg.get("model") or "free")
+    headers = {
+        "Authorization": "Bearer public",
+        "User-Agent": "opencode/1.18.31",
+        "x-opencode-client": "desktop",
+        "x-opencode-session": _free_derive_id("ses_", seed),
+        "x-opencode-request": _free_derive_id(
+            "msg_", seed + "\0" + str(time.time()) + str(os.getpid())),
+        "x-opencode-project": "global",
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+    }
+    body = dict(payload, stream=True, tools=FREE_DECOY_TOOLS, tool_choice="none")
+    url = pcfg["base_url"].rstrip("/") + "/chat/completions"
+    r = requests.post(url, json=body, headers=headers, timeout=timeout, stream=True)
+    if r.status_code != 200:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:300]}")
+    r.encoding = "utf-8"          # iter_lines 默认 latin-1, 中文正文会乱码
+    parts, finish = [], ""
+    for line in r.iter_lines(decode_unicode=True):
+        if not line or not line.startswith("data:"):
+            continue
+        s = line[5:].strip()
+        if s == "[DONE]":
+            break
+        try:
+            j = json.loads(s)
+        except ValueError:
+            continue
+        for ch in j.get("choices") or []:
+            delta = ch.get("delta") or {}
+            if delta.get("content"):
+                parts.append(delta["content"])
+            if ch.get("finish_reason"):
+                finish = ch["finish_reason"]
+    text = "".join(parts).strip()
+    if not text:
+        raise RuntimeError(f"免密车道返回空正文 (finish={finish})")
+    if finish == "length":
+        raise RuntimeError(f"免密车道正文被 max_tokens={payload.get('max_tokens')} 截断")
+    return text
+
+
 def vision_providers(cfg):
-    """视觉 provider 优先级(固定): opencode-go -> DeepSeek 官方 API
+    """视觉 provider 优先级(固定): MiMo 免密 -> opencode-go -> DeepSeek 官方 API
 
     识图不走 deepseek-chat-cli (网页版 CLI 不支持图片输入)。
     """
     out = []
-    for k in ("vision", "vision_fallback"):
+    for k in ("vision_free", "vision", "vision_fallback"):
         p = cfg.get(k)
-        if not p:
+        if not p or not p.get("enabled", True):
             continue
         sig = (p.get("provider"), p.get("base_url"), p.get("model"))
         if any((q.get("provider"), q.get("base_url"), q.get("model")) == sig for q in out):
@@ -918,6 +1010,14 @@ def _call_vision_once(pcfg, api_key, prompt, images):
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+
+    if pcfg.get("provider") == FREE_PROVIDER:
+        # 免密车道: 非流式必挂, 走流式分支 (思考不可关, max_tokens 留足)
+        return _free_lane_post(pcfg, {
+            "model": pcfg["model"],
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": pcfg.get("max_tokens", 8000),
+        }, pcfg.get("timeout", 240))
 
     def post(payload):
         r = requests.post(url, json=payload, headers=headers,
@@ -1174,6 +1274,16 @@ def _call_llm_once(pcfg, api_key, system, user):
     import requests
     _warn_model(pcfg)
     url = pcfg["base_url"].rstrip("/") + "/chat/completions"
+    if pcfg.get("provider") == FREE_PROVIDER:
+        # 免密车道: 非流式必挂, 走流式 + 指纹头 + decoy tools
+        return _free_lane_post(pcfg, {
+            "model": pcfg["model"],
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "max_tokens": pcfg.get("max_tokens", 4000),
+        }, pcfg.get("timeout", 180))
     payload = {
         "model": pcfg["model"],
         "messages": [
@@ -1335,7 +1445,11 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
     if cfg.get("local_ollama"):
         providers = [cfg.get("llm_ollama")]
     else:
-        providers = [cfg.get("llm")]
+        providers = []
+        free = cfg.get("llm_free")
+        if free and free.get("enabled", True):
+            providers.append(free)             # 免费层最前, 挂了自动落到下面三级
+        providers.append(cfg.get("llm"))
         cli = cfg.get("llm_cli")
         if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(cli)
@@ -1784,9 +1898,12 @@ def main():
     if args.limit:
         cfg["limit"] = args.limit
     api_key = load_llm_key()
-    if not cfg.get("local_ollama") and not api_key:
+    free_ok = (cfg.get("llm_free") or {}).get("enabled", True)
+    if not cfg.get("local_ollama") and not api_key and not free_ok:
         log("❌ 未找到 LLM 密钥 (OPENCODE_GO_API_KEY / DEEPSEEK_API_KEY, 检查 .env 或环境变量)")
         return 1
+    if not api_key and free_ok:
+        log("ℹ️ 无本地密钥, 仅免费层可用 (opencode-zen-free)")
 
     lock = RunLock(os.path.join(WORKDIR, "data", "monitor.lock"))
     if not lock.acquire():
@@ -1797,11 +1914,12 @@ def main():
         if not videos:
             log("❌ 无法获取UP主视频列表(风控或网络问题)")
             return 1
-        # 只处理 baseline(前天)及之后发布的视频, 更早的忽略
-        videos = [v for v in videos if is_from_baseline(v)]
-        if not videos:
-            log("前天以来暂无新视频, 退出")
-            return 0
+        # 只处理 baseline(前天)及之后发布的视频, 更早的忽略 (--force 豁免: 始终取最新)
+        if not args.force:
+            videos = [v for v in videos if is_from_baseline(v)]
+            if not videos:
+                log("前天以来暂无新视频, 退出")
+                return 0
         latest = videos[0]
         last_file = os.path.join(STATE_DIR, "last_bvid.txt")
         last_bvid = read_text(last_file).strip()
