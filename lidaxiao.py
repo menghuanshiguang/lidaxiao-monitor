@@ -44,6 +44,8 @@ def main():
                     help="守护运行时间(北京时间, 逗号分隔)")
     ap.add_argument("--config", default=None, help="配置文件")
     ap.add_argument("--grace-minutes", type=int, default=0, help="兼容参数")
+    ap.add_argument("--force", action="store_true",
+                    help="强制处理最新视频(豁免 baseline 日期过滤)")
     args = ap.parse_args()
 
     if args.once:

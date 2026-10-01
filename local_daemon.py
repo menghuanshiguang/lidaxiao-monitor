@@ -236,6 +236,8 @@ def run_monitor(args, local=True):
     cmd = [sys.executable, os.path.join(WORKDIR, "monitor.py")]
     if args.config:
         cmd += ["--config", args.config]
+    if getattr(args, "force", False):
+        cmd += ["--force"]
     env = dict(os.environ)
     if local:
         env["LIDAXIAO_LOCAL"] = "1"
