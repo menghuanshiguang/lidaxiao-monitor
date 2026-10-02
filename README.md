@@ -5,7 +5,8 @@
 <h1 align="center">📺 lidaxiao-monitor · 李大霄视频自动监控分析系统</h1>
 
 <p align="center">
-  <b>AI 全天候盯着李大霄的 B站主页 —— 检测 · 下载 · OCR字幕 · 话术解码 · 每日日报,全自动</b>
+  <b>AI 全天候盯着李大霄的B站主页 —— 检测 · 下载 · OCR字幕 · 话术解码 · 每日日报,全自动</b><br>
+  <b>免密免费 AI 层开箱即用 · 云端 Actions + 本地守护双保险,永不漏更</b>
 </p>
 
 <p align="center">
@@ -13,7 +14,7 @@
   <a href="https://github.com/menghuanshiguang/lidaxiao-monitor/actions"><img src="https://img.shields.io/github/actions/workflow/status/menghuanshiguang/lidaxiao-monitor/monitor.yml?label=auto%20monitor" alt="Actions"></a>
   <img src="https://img.shields.io/badge/Python-3.12+-green.svg" alt="Python">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg" alt="Platform">
-  <img src="https://img.shields.io/badge/GPU-DirectML%20(optional)-orange.svg" alt="GPU">
+  <img src="https://img.shields.io/badge/AI-Free%20lane%20%2B%204%20fallbacks-brightgreen.svg" alt="AI">
 </p>
 
 ---
@@ -35,11 +36,11 @@
 | | | |
 |:---:|:---:|:---:|
 | 🔍 **自动检测** | ⬇️ **自动下载** | 📝 **硬字幕 OCR** |
-| 基于 bilidown CLI(内置 wbi 签名 + 412 反爬),状态文件对比,无新视频秒退 | 480P mp4 自动下载,失败自动重试;登录 cookies 解锁高清 | ffmpeg 抽帧 + RapidOCR,字幕带自动探测,去重/降噪;RTX 显卡 DirectML 加速 6-8 倍 |
-| 🤖 **AI 话术解码** | 📄 **每日日报** | ☁️ **云端全自动** |
-| AI 拆解:核心观点 / 关键数据 / **暗示提取(不是推荐=真实关注点)** / 市场定性 / 操作含义 / **观点连续性(升级/反转一眼看出)** | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要 | GitHub Actions 定时运行(每天 14:40 / 20:00),报告自动提交,电脑不用开机 |
-| 🎬 **片尾暗示识别** | 🖼️ **视觉模型读屏** | 🧊 **选帧 + 兜底** |
-| 片尾卡片(结束语 / 荐书卡 / 合规声明 / 数据面板)+**图形动画**(地球≈地球顶、钻石≈钻石底、婴儿底等标志性比喻)——OCR 全丢,改用**视觉模型**读,报告单列【片尾暗示】 | `deepseek-flash` 多图识别;16×16 签名去重 + **最远点采样**选帧,覆盖口播/卡片/地球动画/声明等不同场景;画面比喻单独提取为 **🎯 画面图形暗示**(地球顶/钻石底/婴儿底…按"形态 → 含义 → 🔴/🟢"判定并置顶) | 结果缓存 `state/ending_hints.json` 随仓库同步;OpenCode 额度用尽自动切 DeepSeek 官方;视觉不可用时只跳过该小节 |
+| bilidown CLI(wbi 签名 + 412 反爬),状态对比,无新视频秒退;只处理**前天以来**的视频,`--force` 可强制 | 480P mp4,失败重试;**完整性校验**(ffprobe 实际时长 ≥97% 才算下全,截断自动重下) | ffmpeg 抽帧 + RapidOCR,字幕带自动探测,去重/降噪;RTX 显卡 DirectML 加速 6-8 倍 |
+| 🤖 **AI 话术解码** | 📄 **每日日报** | ☁️ **云端 + 本地双保险** |
+| 核心观点 / 关键数据 / **暗示提取**("不是推荐"=真实关注点) / 市场定性 / 操作含义 / **观点连续性**(延续/升级/反转一眼看出) | `reports/YYYY-MM-DD.md` 按日期归档,同天多视频追加,顶部当日摘要;发布时按 BV 合并进 `docs/reports/` | Actions 定时(14:40/20:00)+ 本地守护(**14:39/19:59,早 1 分钟**),`gh variable` 认领标志互斥,**谁先跑另一方自动跳过** |
+| 🎬 **片尾暗示识别** | 🖼️ **视觉模型读屏** | 🆓 **免密免费 AI 层** |
+| 片尾卡片(结束语/荐书卡/合规声明/数据面板)+**图形动画**(地球≈地球顶、钻石≈钻石底、婴儿底)——OCR 全丢,改用**视觉模型**读,报告单列【片尾暗示】 | 16×16 签名去重 + **最远点采样**选帧(≤6 帧覆盖口播/卡片/动画/声明);画面比喻单独提取为 **🎯 画面图形暗示**(形态 → 含义 → 🔴/🟢)置顶 | `opencode-zen-free` 公共免密网关(**零密钥**),文本 + 片尾识图双链路,默认置顶;挂了自动落到下面 4 级兜底 |
 
 **流程示意**
 
@@ -49,9 +50,43 @@
 
 ---
 
+## 🏗️ 系统架构: 一个入口, 云端本地双跑
+
+所有入口都汇聚到 **`lidaxiao.py`**(自动识别运行环境),核心流水线在 **`monitor.py`**:
+
+```
+                     ┌─────────────────────────────────────────┐
+   Actions 定时       │  ☁️ GitHub Actions (windows-latest)      │
+   14:40 / 20:00      │  python lidaxiao.py --once [--force]    │
+        ┌─────────────┤  ① 查认领标志: 本地在跑(≤30min) → 跳过   │
+        │             │  ② 否则: 重置状态 → monitor → 发布报告   │
+        │             └─────────────────────────────────────────┘
+        │  互斥靠 gh variable LOCAL_DAEMON_CLAIMED_AT (认领标志)
+        │             ┌─────────────────────────────────────────┐
+        └─────────────┤  🖥️ 本地守护 (14:39 / 19:59, 早1分钟)     │
+   local_daemon.py /   │  ① 云端已有今日报告?云端正在跑? → 跳过   │
+   托盘版 / 计划任务     │  ② 否则: 写认领标志 → git pull 同步状态   │
+                       │  ③ LIDAXIAO_LOCAL=1 跑 monitor (Ollama) │
+                       │  ④ 报告+状态 git push [skip ci]          │
+                       │  ⑤ ollama stop 释放内存 → 清认领标志      │
+                       └─────────────────────────────────────────┘
+                                          │
+                                          ▼
+                       reports/YYYY-MM-DD.md → (按BV合并) → docs/reports/
+                                          │
+        monitor.py 流水线 ────────────────┘
+        检测 → 下载+完整性校验 → 抽帧OCR → 片尾取帧 → 视觉识别片尾
+             → AI 话术解码(免费层→4级兜底) → 写日报(含观点连续性)
+```
+
+- **本地崩了怎么办**:认领标志 30 分钟自动过期,云端照常接管;云端挂了,本地检查到无报告会补跑。
+- **状态永远一份**:`state/`(last_bvid / processed / 片尾识别缓存)**入库随仓库同步**,本地每次运行前 `git pull --ff-only`,云端本地互不重复分析。
+
+---
+
 ## 📸 效果展示
 
-**AI 生成的日报(真实内容, 2026-08-13《高度警惕美股泡沫爆破》)**
+**AI 生成的日报(真实内容, 2026-10-02《外资不要利用假期搞小动作》)**
 
 <p align="center">
   <img src="docs/screenshots/report.png" width="85%" alt="report">
@@ -69,161 +104,191 @@ pip install -r requirements.txt
 git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ```
 
-### 2️⃣ 配置密钥与登录
+### 2️⃣ 配置(密钥可选,B站登录建议做)
 
 ```bash
-# AI 分析密钥 (三级兜底: OpenCode Go -> deepseek-chat-cli -> DeepSeek 官方 API)
-echo "OPENCODE_GO_API_KEY=sk-xxxx" >> .env
-echo "DSV_TOKEN=xxxx" >> .env
-echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env
+# 🆓 AI 分析: 什么都不配也能跑 —— 免密免费层默认置顶 (mimo-v2.6-flash-free)
+#    想走更稳的付费兜底链再配 (全部可选, 缺谁自动跳过谁):
+echo "OPENCODE_GO_API_KEY=sk-xxxx" >> .env   # 主通道 OpenCode Zen Go
+echo "DSV_TOKEN=xxxx" >> .env                # 第二兜底 deepseek-chat-cli
+echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env      # 最后兜底 DeepSeek 官方
 
-# B站扫码登录 (一次性, 解锁高清并降低风控)
+# B站扫码登录 (建议: 解锁高清 + 降低 412 风控)
 python _setup/login_wait.py     # 浏览器打开二维码, B站App扫码
 ```
-
-> 本地启用 `deepseek-chat-cli` 兜底(可选): 首次会自动克隆公开仓库, 还需要安装它的依赖
-> ```bash
-> pip install -r _repo/deepseek-chat-cli/requirements.txt
-> ```
 
 ### 3️⃣ 运行
 
 ```bash
-python monitor.py              # 无新视频秒退; 有新视频自动处理
-python monitor.py --force      # 强制重新处理最新视频
-python monitor.py --check-vision   # 自检片尾视觉通道(不下载不分析)
+python lidaxiao.py --once          # ⭐ 统一入口: 手动跑一次 (自动识别云端/本地)
+python lidaxiao.py --daemon        # 本地常驻守护 (14:39/19:59 到点自动跑)
+python lidaxiao.py --once --force  # 强制处理最新视频 (豁免日期过滤, 按发布日写报告)
+
+python monitor.py                  # 直接跑核心流水线 (无新视频秒退)
+python monitor.py --check-vision   # 自检片尾视觉通道 (不下载不分析)
 ```
 
-> 💡 更多用法:批量补全历史字幕 `python batch_subtitles.py` · 发布规律分析 `python _setup/analyze_pubtimes.py` · 本地定时任务 `powershell -File _setup/install_schedule.ps1`
+> 💻 **Windows 懒人包**:`run_monitor.cmd`(计划任务/手动包装,日志进 `data\run.log`)· `start_local_daemon.cmd`(本地守护,Ollama 环境已预设)· `local_daemon_tray.py`(**托盘版**:右下角常驻,菜单 立即运行/查看日志/退出)
+>
+> 💡 **更多用法**:批量补全历史字幕 `python batch_subtitles.py` · 发布规律分析 `python _setup/analyze_pubtimes.py` · 本地计划任务 `powershell -File _setup/install_schedule.ps1`(科学化 7 次/天)· 失败重跑 `python _setup/reset_failed_state.py`
 
 ---
 
-## ⏰ 自动运行(GitHub Actions)
+## ⏰ 自动运行(GitHub Actions + 本地守护)
 
-本仓库内置 CI,配置以下 Secret 后即可云端全自动:
+### 云端: 内置 CI,配好 Secret 即全自动
 
-| Secret | 说明 |
-|--------|------|
-| `OPENCODE_GO_API_KEY` | OpenCode Zen Go API 密钥(AI 分析主通道,模型 `deepseek-flash`,思考强度 `max`) |
-| `DSV_TOKEN` | DeepSeek 网页版登录 token(第二兜底 `deepseek-chat-cli` 使用) |
-| `DEEPSEEK_API_KEY` | DeepSeek 官方 API 密钥(最后兜底,模型 `deepseek-flash`) |
-| `BILIBILI_COOKIES_B64` | B站登录 cookies(base64,由 `data/cookies.txt` 转换) |
+| Secret | 必需? | 说明 |
+|--------|------|------|
+| `BILIBILI_COOKIES_B64` | ✅ 必需 | B站登录 cookies(base64),下载/风控用 |
+| `OPENCODE_GO_API_KEY` | 可选 | OpenCode Zen Go API(AI 主通道,模型 `deepseek-flash`) |
+| `DSV_TOKEN` | 可选 | DeepSeek 网页版 token(第二兜底 deepseek-chat-cli) |
+| `DEEPSEEK_API_KEY` | 可选 | DeepSeek 官方 API(最后兜底) |
 
-> `deepseek-chat-cli` 已提供公开仓库(不含 token),Actions 直接公开克隆,无需 PAT。
+> 🆓 **三个 AI 密钥一个都不配也能跑**:免密免费层(`opencode-zen-free`)默认开启,文本 + 识图全覆盖。`deepseek-chat-cli` 仓库已公开,Actions 直接克隆,无需 PAT。
 
 ```bash
-gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor
-gh secret set DSV_TOKEN --repo <your>/lidaxiao-monitor
-gh secret set DEEPSEEK_API_KEY --repo <your>/lidaxiao-monitor
 gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
+gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor   # 可选
 ```
 
-- 每天 **北京时间 14:40 / 20:00** 自动运行(也可手动 `Run workflow`)
-- 报告自动提交到 `docs/reports/`(日报全部保留)+ 上传 artifact
-- 状态与字幕通过 Actions 缓存持久化,无新视频秒退,不重复分析
-- 片尾视觉通道有**非阻断预检**(`python monitor.py --check-vision`):额度/密钥问题会提前打在日志里,失败也只跳过【片尾暗示】小节,不影响主流程
+- 每天 **北京时间 14:40 / 20:00** 自动运行;手动 `Run workflow` 可勾选 **`force`** 输入强制重处理最新视频
+- 运行前有**非阻断视觉预检**(`--check-vision`),额度/密钥问题提前打进日志,失败只跳过【片尾暗示】小节
+- 状态走 Actions 缓存,无新视频秒退;报告 + `state/` 自动提交(`[skip ci]`),另上传 artifact 保留 14 天
+
+### 本地: 守护进程与云端无缝错峰
+
+```bash
+python lidaxiao.py --daemon        # 或 python local_daemon.py / local_daemon_tray.py
+```
+
+- **时间错峰**:本地 14:39/19:59,比云端早 1 分钟;错过 slot 60 分钟内仍补跑
+- **三方检查后才动手**:① 云端已有前天/昨天/今天的报告?② 云端 workflow 正在跑?③ 都没有 → 写认领标志(`gh variable set`,需先 `gh auth login`)→ 开跑
+- **本地优先模型**:Ollama 本地大模型(`batiai/qwen3.6-35b:iq3`,MoE 40 专家下 CPU),零 API 成本;跑完自动 `ollama stop` 释放内存
+- 报告/状态照常推送回仓库,与云端格式完全一致
 
 ---
 
-## 🧠 模型选择 (2026-09 更新)
+## 🤖 模型选择与调用链(2026-10 更新)
 
-DeepSeek 官方已启用新模型名([官方文档](https://api-docs.deepseek.com/zh-cn/)),本项目已全部切换:
+**文本分析固定优先级**(`call_llm`,任一级失败/无密钥自动降级):
 
-| 用途 | 模型名 | 说明 |
-|------|--------|------|
-| 文本分析(主) | `deepseek-flash` | OpenCode Zen Go 通道 |
-| 文本分析(兜底) | `deepseek-flash` | DeepSeek 官方 `https://api.deepseek.com` |
-| 片尾视觉 | `deepseek-flash` | **官方唯一支持图像理解的模型**(`deepseek-v4-pro` 不支持图像) |
+| # | 通道 | provider | 模型 | 密钥 |
+|---|------|----------|------|------|
+| 1 | 🆓 免密免费层(默认开启) | `opencode-zen-free` | `mimo-v2.6-flash-free` | **无需任何密钥** |
+| 2 | OpenCode Zen Go | `opencode-go` | `deepseek-flash` | `OPENCODE_GO_API_KEY` |
+| 3 | deepseek-chat-cli(网页版) | `deepseek-chat-cli` | 网页版会话 | `DSV_TOKEN` |
+| 4 | DeepSeek 官方 API | `deepseek` | `deepseek-flash` | `DEEPSEEK_API_KEY` |
+| — | 本地模式(`LIDAXIAO_LOCAL=1`) | `ollama` | `batiai/qwen3.6-35b:iq3` | 无需密钥 |
 
-**官方当前可用模型**(`GET /models`):`deepseek-flash`(= DeepSeek-V4.1-Flash)、`deepseek-v4-pro`(= DeepSeek-V4-Pro-0813)。
+**片尾视觉固定优先级**(`vision_providers`,网页版 CLI 不支持图片,识图不经过第 3 级):
 
-> ⚠️ **旧模型名已下线**:`deepseek-chat`、`deepseek-reasoner`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`
-> 仍可调用,但对应模型已下线,请求会由 **V4.1 Flash** 承接并按 Flash 价格计费。所以本项目已改用 `deepseek-flash`。
-> 官方计划 **2026-09-14 12:00 起**把 `deepseek-v4-pro` 的请求也路由到 V4.1 Flash。
+`vision_free`(MiMo 免密) → `vision`(opencode-go `deepseek-flash`) → `vision_fallback`(DeepSeek 官方 `deepseek-flash`)
 
-**思考模式**:`deepseek-flash` 默认开启思考,思考强度通过 `reasoning_effort` 控制(取值 `low`/`high`/`max`,
-旧值 `minimal`/`medium`/`xhigh`/`ultra` 会被官方映射)。在 `config.json` 里用 `reasoningEffort` 配置,留空即关闭思考模式。
+> 🔧 **免密层协议细节**(实测自 `zouyuxuan122/dsh-our-free-model`):必须 `stream:true`(非流式 500/403);body 要带 bash/glob/grep/read 四个最小诱饵 tools + `tool_choice:none`;`reasoning_effort` 是空操作,思考与正文抢 `max_tokens` 所以预算靠顶满 `max_tokens`;免费额度按 session 计,`ses_`/`msg_` id 用 sha256 稳定派生。以上均已内置,无需配置。
+>
+> 🔧 **想关掉免费层**:`config.json` 里设 `"llm_free": {"enabled": false}` / `"vision_free": {"enabled": false}`。
 
-```jsonc
-"llm_fallback":  { "provider": "deepseek", "model": "deepseek-flash", "reasoningEffort": "medium" },
-"vision_fallback": { "provider": "deepseek", "model": "deepseek-flash" }
-```
+**DeepSeek 官方模型名(2026-09 起)**:可用 `deepseek-flash`(=V4.1-Flash,唯一支持图像理解)、`deepseek-v4-pro`。旧名 `deepseek-chat`/`deepseek-reasoner`/`deepseek-v4-flash` 已下线,请求由 V4.1 Flash 承接。思考强度 `reasoningEffort`: `low`/`high`/`max`(`config.json` 配置,留空关闭)。
 
-> 想省钱可以把兜底模型换成 `deepseek-v4-pro`,或在空闲时段(非周一至周五 9:00-12:00 / 14:00-18:00)运行,价格为高峰时段的一半。
+> 💰 省钱提示:官方 API 空闲时段(非工作日/非 9:00-12:00、14:00-18:00)半价;或者干脆全用免费层 + 本地 Ollama。
 
 ---
 
 ## 📂 目录结构
 
 ```
-├── monitor.py              # 主脚本 (检测/下载/OCR/片尾视觉/分析/报告)
-├── batch_subtitles.py      # 批量字幕提取 (全量历史视频, 断点续传)
-├── config.json             # 配置 (UID/OCR/LLM/片尾视觉)
-├── requirements.txt        # Python 依赖
+├── lidaxiao.py              # ⭐ 统一入口 (--once 云端/本地自适应, --daemon 本地守护)
+├── monitor.py               # 核心流水线 (检测/下载/OCR/片尾视觉/AI分析/报告)
+├── local_daemon.py          # 本地常驻定时 + 认领标志互斥 + 报告发布
+├── local_daemon_tray.py     # 托盘版 (pystray: 立即运行/查看日志/退出)
+├── batch_subtitles.py       # 批量字幕提取 (全量历史, 多进程断点续传)
+├── config.json              # 配置 (UID/OCR/LLM五级通道/片尾视觉)
+├── requirements.txt         # Python 依赖
+├── run_monitor.cmd          # Windows 计划任务包装 (日志 → data\run.log)
+├── start_local_daemon.cmd   # Windows 本地守护启动 (Ollama 环境预设)
+├── agent_task.md            # 项目最初的任务书 (需求与验收标准)
+├── 发布规律分析.md           # 400 条发布样本统计 → 定时方案依据
 ├── _setup/
-│   ├── login_wait.py       # B站扫码登录辅助
-│   ├── install_schedule.ps1# 本地计划任务安装 (科学化7次/天)
-│   ├── fetch_pubdates.py   # 拉取UP主历史发布时间
-│   ├── analyze_pubtimes.py # 发布规律分析
-│   └── weekly_summary.py   # 周度总结生成
-├── docs/reports/           # 自动生成的日报 (CI 提交)
-├── state/                  # 状态: last_bvid / processed / 片尾识别缓存 (入库同步)
-├── data/                   # 状态/字幕/帧 (运行时生成, 不入库)
-└── reports/                # 本地日报 (不入库)
+│   ├── login_wait.py        # B站扫码登录
+│   ├── install_schedule.ps1 # 本地计划任务安装 (科学化 7 次/天)
+│   ├── fetch_pubdates.py    # 拉取UP主历史发布时间
+│   ├── analyze_pubtimes.py  # 发布规律分析
+│   ├── weekly_summary.py    # 周度总结生成
+│   ├── week_process.py      # 指定日期段补处理 (周报/补全)
+│   ├── reset_failed_state.py# 清失败状态, 让下次 Actions 自动重跑
+│   └── chat_ollama.py       # Ollama 交互调试客户端
+├── skills/daxiao-strategy/  # 🧠 策略研判 skill (报告 → 定性 → 逐仓操作)
+├── docs/reports/            # 日报 (自动发布): index.md / latest.md / weekly.md
+├── state/                   # 共享状态 (入库): last_bvid / processed / 片尾缓存
+├── data/                    # 运行时 (不入库): 视频/帧/日志/锁
+└── reports/                 # 本地日报 (不入库, 发布时按BV合并进 docs/reports)
 ```
+
+---
+
+## 🧠 配套 Skill: daxiao-strategy
+
+[`skills/daxiao-strategy`](./skills/daxiao-strategy/SKILL.md) 把日报转成**可执行决策**(观点 → 定性 → 操作):
+
+- **五级宏观定调**:A 高度警惕 → B 谨慎防御 → C 温柔市/止跌 → D 反弹(非反转) → E 结构性看多
+- **老登/小登风格循环理论** + 话术解码表("XX不是推荐"=隐性推荐)
+- **量能一票否决**:"没量=不是反转",缩量一律按反弹处理
+- 流程:`market daxiao` 拉客观数据 → 读 `docs/reports/latest.md` → 定级 → 话术解码 → 逐仓动作
 
 ---
 
 ## ❓ FAQ
 
+**Q: 一个密钥都没有,真的能跑吗?**
+A: 能。免密免费层(`mimo-v2.6-flash-free`)默认置顶,文本分析和片尾识图都覆盖;配好 `BILIBILI_COOKIES_B64` 就能全流程无人值守。付费通道只是"更稳的兜底"。
+
+**Q: 本地和云端会不会重复处理同一个视频?**
+A: 不会,三重互斥:① 本地先跑并写 `gh variable` 认领标志,云端看到标志新鲜(≤30分钟)直接跳过;② 本地跑之前先查云端报告是否已存在、workflow 是否正在跑;③ `state/processed.txt` 入库同步,同 BV 不会分析两次。
+
 **Q: "不是推荐"到底是什么?**
 A: 李大霄的合规话术。本项目 AI 会专门提取这类暗示,标注语境(机会暗示/风险警示)和情绪(🔴警示/🟢看多/⚪中性/⚠️风险)。
 
 **Q: 片尾暗示是怎么读的?为什么不用 OCR?**
-A: 片尾有两类东西 OCR 都拿不到:① 整屏密集文字(合规声明/荐书卡/数据面板),会被 OCR 的"数字过多=噪声"规则丢掉;② **图形动画**(如地球/星球≈"地球顶"、钻石≈"钻石底"、婴儿底等李大霄标志性比喻)。所以单独用 **`deepseek-flash` 视觉模型**读片尾画面:ffmpeg 取最后 45 秒的帧 → 16×16 签名去重 + **最远点采样**选出最多 6 帧(保证覆盖口播结束语 / 荐书卡 / 地球动画 / 声明卡等不同场景,均匀取样会整段漏掉)→ 输出【片尾口语 / 卡片 / 画面 / **画面暗示** / 数据 / 暗示】**六行**,写进报告并参与 AI 分析。识别结果按 BV 缓存到 `state/ending_hints.json`,同一视频不重复调用。不想用可以 `config.json` 里设 `"vision": {"enabled": false}` 关闭(主流程不受影响)。
+A: 片尾有两类 OCR 拿不到的东西:① 整屏密集文字(合规声明/荐书卡/数据面板),会被"数字过多=噪声"规则丢掉;② **图形动画**(地球≈地球顶、钻石≈钻石底、婴儿底等标志性比喻)。所以用视觉模型读:片尾 45 秒取帧 → 签名去重 + 最远点采样选 ≤6 帧 → 输出【片尾口语/卡片/画面/画面暗示/数据/暗示】六行,按 BV 缓存进 `state/ending_hints.json`。设 `"vision": {"enabled": false}` 可关闭,主流程不受影响。
 
-**Q: 什么叫"画面图形暗示"?和"片尾暗示"有什么区别?**
-A: 两者刻意分开,因为**画面比喻比文字更能透露真实态度**——李大霄的标志性图形往往就是他对当前位置的判断,但这些比喻容易淹没在荐书卡和免责声明里:
+**Q: 什么叫"画面图形暗示"?**
+A: 画面比喻比文字更能透露真实态度,刻意与文字暗示分列:
 
-| 画面图形 | 对应含义 | 方向 |
+| 画面图形 | 含义 | 方向 |
 |---|---|---|
-| 地球 / 星球 / 球体 / 地球仪 | **地球顶** | 🔴 高位见顶风险 |
+| 地球 / 星球 / 地球仪 | **地球顶** | 🔴 高位见顶风险 |
 | 钻石 / 宝石 | **钻石底** | 🟢 低位机会 |
 | 婴儿 / 儿童 | **婴儿底** | 🟢 底部区域 |
-| 山峰 / 山峦 / 登顶 | 顶部 / 高位 | 🔴 |
-| 山谷 / 深谷 / 下坡 | 底部 / 低位 | 🟢 |
-| 向上箭头 | 看多 / 上涨 | 🟢 |
-| 向下箭头 | 看空 / 下跌 | 🔴 |
-| 书 / 二维码 / 图标等 | 不构成行情隐喻 | ⚪ 不附会 |
+| 山峰 / 登顶 | 顶部 / 高位 | 🔴 |
+| 山谷 / 下坡 | 底部 / 低位 | 🟢 |
+| 向上箭头 / 向下箭头 | 看多 / 看空 | 🟢 / 🔴 |
+| 书 / 二维码等 | 不构成行情隐喻 | ⚪ 不附会 |
 
-- 视觉模型**只依据图形**(不看文字)单独判定这一行,输出 `形态 → 含义 → 🔴/🟢`;画面上确实出现了就用肯定语气直接判定(不再写"可能对应"),没有出现就写"无"。
-- 报告里这一行会**单独置顶加粗**:`🎯 画面图形暗示: ...`
-- 文字分析(【暗示提取】)里会**额外多一条** `片尾图形:` 条目,与文字侧的 `片尾:` 条目并列,并要求在【操作含义】中体现该方向倾向。
+报告里单独置顶:`🎯 画面图形暗示: ...`;文字分析另加 `片尾图形:` 条目并要求体现在【操作含义】里。想重跑某视频:删掉 `state/ending_hints.json` 里对应条目(提示词版本号 `ENDING_PROMPT_VER` 升版会自动失效)。
 
-> 想验证效果:把 `state/ending_hints.json` 里某个视频的 `"ver"` 改掉(或删掉该条),下次运行会重跑片尾识别。提示词版本号是 `ENDING_PROMPT_VER`,升版后旧缓存自动失效。
+**Q: `--force` 什么时候用?**
+A: 强制重处理最新视频时用(`lidaxiao.py --once --force` / Actions 手动触发勾选 `force`)。会豁免"前天以来"的日期过滤,且报告按**视频发布日**命名、发布闸门走 mtime(6小时)兜底,旧视频也能正常归档发布。
 
 **Q: 视频下载不完整会怎样?**
-A: 已加下载完整性校验:用 B站元数据时长对比 `ffprobe` 实际时长,明显偏短(默认 <97%)就自动重下一次;重下仍残缺则在报告里打 `⚠️ 视频下载不完整` 提示。这条校验是必需的——截断的 mp4 容器头仍报完整时长,ffmpeg 会提前结束,抽帧变少,片尾窗口会落在视频中间,导致读不到真正的片尾(以及结论不全)。
+A: 用 B站元数据时长对比 `ffprobe` 实际时长,<97% 自动重下一次;仍残缺则报告打 `⚠️ 视频下载不完整`。这条校验必需——截断的 mp4 容器头仍报完整时长,ffmpeg 会提前结束,片尾窗口落在视频中间,读不到真正的片尾。
 
 **Q: 为什么用 OCR 而不是官方字幕?**
 A: 多数视频无官方字幕,且硬字幕(画面内文字)才是他真正展示的内容——点位、百分比、表格全在画面上。
 
-**Q: 本地跑还是云端跑?**
-A: 都可以。GitHub Actions 云端全自动(推荐);本地 Windows 计划任务同样支持(科学化 7 次/天,基于 400 条发布历史统计)。
-
 **Q: cookies 失效了怎么办?**
-A: 重新扫码登录后更新 Secret:`python _setup/login_wait.py` → 转换 base64 → `gh secret set BILIBILI_COOKIES_B64`。
+A: `python _setup/login_wait.py` 重新扫码 → 转 base64 → `gh secret set BILIBILI_COOKIES_B64`。
 
 **Q: 每天跑多少次最合理?**
-A: 数据分析显示李大霄日均发布 3.67 条,高峰在 10-15 时(40%)与 18-23 时(43%),中位间隔 3 小时。云端 2 次 + 本地 7 次方案见 `发布规律分析.md`。
+A: 400 条样本统计:日均 3.67 条,高峰 10-15 时(40%)与 18-23 时(43%),中位间隔 3 小时 → 云端 2 次 + 本地守护 2 次 + 计划任务 7 次方案,依据见 [`发布规律分析.md`](./发布规律分析.md)。
 
 ---
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧) · RapidOCR + onnxruntime(-directml)(OCR) · OpenCode Zen Go API(主, 文本+视觉 `deepseek-flash`) + [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli)(第二兜底) + DeepSeek API(最后兜底, 视觉同模型) · GitHub Actions(定时/部署)
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧/时长校验) · RapidOCR + onnxruntime-directml(OCR) · AI: 🆓 OpenCode Zen 免密层(`mimo-v2.6-flash-free`) → [OpenCode Zen Go](https://opencode.ai)(`deepseek-flash`) → [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli) → DeepSeek 官方 API · 本地 Ollama(`qwen3.6-35b`) · GitHub Actions + 本地守护进程
 
-> **调用优先级**:文本分析 `opencode-go → deepseek-chat-cli → DeepSeek 官方 API`;片尾识图 `opencode-go → DeepSeek 官方 API`(网页版 CLI 不支持图片输入,识图不经过它)。每一级失败/无密钥自动降到下一级,日志里能看到实际用了谁。
+> **调用优先级**:文本 `免费层 → opencode-go → deepseek-chat-cli → DeepSeek 官方`;片尾识图 `免费层 → opencode-go → DeepSeek 官方`。每一级失败/无密钥自动降级,日志里能看到实际用了谁。
 
 ## ⚖️ 免责声明
 
