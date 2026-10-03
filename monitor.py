@@ -166,15 +166,13 @@ def load_config(path=None):
     if os.path.exists(p):
         with open(p, "r", encoding="utf-8") as f:
             user = json.load(f)
+        # 先深合并嵌套段再整体更新: cfg.update(user) 会把嵌套 dict 整体替换掉,
+        # 导致后面的 cfg[k].update(user[k]) 变成 no-op, 用户配置缺省字段的默认值全部丢失
+        for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama",
+                  "vision_free", "vision", "vision_fallback"):
+            if isinstance(user.get(k), dict):
+                cfg[k].update(user.pop(k))
         cfg.update(user)
-        cfg["llm_free"].update(user.get("llm_free", {}))
-        cfg["llm"].update(user.get("llm", {}))
-        cfg["llm_fallback"].update(user.get("llm_fallback", {}))
-        cfg["llm_cli"].update(user.get("llm_cli", {}))
-        cfg["llm_ollama"].update(user.get("llm_ollama", {}))
-        cfg["vision_free"].update(user.get("vision_free", {}))
-        cfg["vision"].update(user.get("vision", {}))
-        cfg["vision_fallback"].update(user.get("vision_fallback", {}))
     # 本地模式开关: 环境变量 LIDAXIAO_LOCAL=1 或 config.json local_ollama=true
     cfg["local_ollama"] = bool(user.get("local_ollama", False)) if os.path.exists(p) else False
     if os.environ.get("LIDAXIAO_LOCAL") == "1":
@@ -202,8 +200,12 @@ def _env_or_envfile(name):
         with open(envf, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line.startswith(name):
-                    return line.split("=", 1)[1].strip().strip("'\"")
+                if line.startswith("#") or "=" not in line:
+                    continue
+                # 精确匹配变量名, 避免 DSV_TOKEN 误匹配 DSV_TOKEN2 等同前缀键
+                key, val = line.split("=", 1)
+                if key.strip() == name:
+                    return val.strip().strip("'\"")
     return ""
 
 
@@ -1685,6 +1687,12 @@ def upsert_report(video, section_md, summary_line, list_line):
     if sec is not None:
         s, e = sec
         lines = text.splitlines()
+        # build_section 头恒为 "## 视频1:", 替换时必须沿用原章节编号,
+        # 否则重跑同一章节会产生重复的 "## 视频1:"
+        m = re.match(r"^## 视频(\d+):", lines[s]) if s < len(lines) else None
+        if m:
+            section_md = re.sub(r"^## 视频\d+:", f"## 视频{m.group(1)}:",
+                                section_md, count=1)
         text = "\n".join(lines[:s] + [section_md] + lines[e:])
         log(f"报告章节已更新(BV {bvid}): {rp}")
     else:
