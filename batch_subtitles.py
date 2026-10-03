@@ -75,6 +75,7 @@ def fetch_all_videos():
     mixin_key = "".join((img + sub)[i] for i in MIXIN)[:32]
     out = []
     page = 1
+    fails = 0
     while page <= 60:
         params = {"mid": UID, "ps": "50", "pn": str(page), "order": "pubdate",
                   "wts": int(time.time())}
@@ -84,9 +85,16 @@ def fetch_all_videos():
         url = "https://api.bilibili.com/x/space/wbi/arc/search?" + urllib.parse.urlencode(params)
         d = bili_api_get(url, referer=f"https://space.bilibili.com/{UID}")
         if not d or d.get("code") != 0:
-            print(f"列表拉取失败 page={page} code={d and d.get('code')}, 稍后重试", flush=True)
+            fails += 1
+            print(f"列表拉取失败 page={page} code={d and d.get('code')} "
+                  f"(连续{fails}次), 稍后重试", flush=True)
+            if fails >= 5:
+                # 连续失败达上限: 中止翻页, 用已拿到的数据, 避免无限循环
+                print("连续失败达到上限, 停止拉取列表", flush=True)
+                break
             time.sleep(20)
             continue
+        fails = 0
         vlist = d["data"]["list"]["vlist"]
         total = d["data"]["page"]["count"]
         out.extend({"bvid": v["bvid"], "title": v["title"],

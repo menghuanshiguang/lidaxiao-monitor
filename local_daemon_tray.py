@@ -26,11 +26,15 @@ def make_icon_image():
 
 def daemon_loop(times, grace_minutes, config):
     args = argparse.Namespace(config=config, grace_minutes=grace_minutes)
+    last_run_slot = None
     while not STOP.is_set():
         now = daemon.datetime.datetime.now(daemon.CN_TZ)
-        nxt = daemon.next_run(now, times)
-        if now >= nxt:
+        # find_due_slot 返回"到点且在宽限期内且未跑过"的 slot;
+        # 未到点返回 None (daemon.next_run 不存在, 旧代码会 AttributeError)
+        due = daemon.find_due_slot(now, times, last_run_slot)
+        if due is not None:
             daemon.run_slot(args)
+            last_run_slot = due
             continue
         time.sleep(30)
 
