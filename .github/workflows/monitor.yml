@@ -53,6 +53,12 @@ jobs:
         run: pip install --disable-pip-version-check -r _repo/deepseek-chat-cli/requirements.txt
         shell: pwsh
 
+      - name: Clone deepseek-vision-cli (public)
+        run: |
+          # dsv.py 驱动系统自带 Edge (playwright 客户端复用上一步安装);
+          # 片尾识图第 3 级通道, DSV_TOKEN secret 未配置时自动跳过
+          git clone --depth 1 https://github.com/menghuanshiguang/deepseek-vision-cli.git _repo/deepseek-vision-cli
+
       - name: Write Bilibili cookies (from secret)
         shell: pwsh
         env:
@@ -80,6 +86,7 @@ jobs:
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
           PYTHONIOENCODING: utf-8
         run: python monitor.py --check-vision
 

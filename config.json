@@ -53,6 +53,13 @@
     "max_width": 1280,
     "jpeg_quality": 85
   },
+  "vision_cli": {
+    "provider": "deepseek-vision-cli",
+    "repo": "https://github.com/menghuanshiguang/deepseek-vision-cli.git",
+    "path": "_repo/deepseek-vision-cli",
+    "token_env": "DSV_TOKEN",
+    "timeout": 240
+  },
   "vision_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",

@@ -7,8 +7,8 @@
   1. 更新检测  : bilidown space 获取 UP主最新视频, 与 data/last_bvid.txt 对比
   2. 视频下载  : bilidown dl 下载 480P mp4 (失败重试1次)
   3. 字幕提取  : ffmpeg 抽帧 + RapidOCR 硬字幕识别 (自适应字幕区域 + 相邻帧去重)
-  4. 片尾识别  : ffmpeg 取片尾帧 + deepseek-flash 视觉模型读"片尾暗示"
-                (结束语/荐书卡/合规声明卡/数据面板; OCR 会丢弃的整屏密集文字)
+  4. 片尾识别  : ffmpeg 取片尾帧 + 视觉链(MiMo免密 → opencode-go → deepseek-vision-cli 网页版识图 → DeepSeek官方)
+                读"片尾暗示" (结束语/荐书卡/合规声明卡/数据面板; OCR 会丢弃的整屏密集文字)
   5. AI 分析   : OpenCode Zen Go API (deepseek-flash) 对字幕+片尾做"李大霄话术解码"分析
   6. 每日报告  : reports/YYYY-MM-DD.md (当天已有报告则追加)
   7. 状态幂等  : data/last_bvid.txt + data/processed.txt + 并发锁
@@ -152,6 +152,15 @@ def load_config(path=None):
             "max_width": 1280,                  # 帧降采样宽度(省token)
             "jpeg_quality": 85,
         },
+        "vision_cli": {                         # 片尾识别第三级: deepseek-vision-cli (DeepSeek 网页版「识图模式」)
+            "enabled": True,
+            "provider": "deepseek-vision-cli",
+            "repo": "https://github.com/menghuanshiguang/deepseek-vision-cli.git",
+            "path": "_repo/deepseek-vision-cli",
+            "token_env": "DSV_TOKEN",
+            "model": "deepseek-vision-web",     # 仅报告展示用 (网页版无模型名)
+            "timeout": 240,                     # 回答等待上限(秒), 经 DSV_TIMEOUT 传给 dsv.py
+        },
         "vision_fallback": {                    # 视觉兜底: DeepSeek 官方 API (同一模型)
             "provider": "deepseek",
             "base_url": "https://api.deepseek.com",
@@ -169,7 +178,7 @@ def load_config(path=None):
         # 先深合并嵌套段再整体更新: cfg.update(user) 会把嵌套 dict 整体替换掉,
         # 导致后面的 cfg[k].update(user[k]) 变成 no-op, 用户配置缺省字段的默认值全部丢失
         for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama",
-                  "vision_free", "vision", "vision_fallback"):
+                  "vision_free", "vision", "vision_cli", "vision_fallback"):
             if isinstance(user.get(k), dict):
                 cfg[k].update(user.pop(k))
         cfg.update(user)
@@ -184,10 +193,13 @@ LLM_PROVIDER_KEY_ENVS = {
     "opencode-go": ("OPENCODE_GO_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "deepseek-chat-cli": ("DSV_TOKEN", "DEEPSEEK_CHAT_CLI_TOKEN"),
+    "deepseek-vision-cli": ("DSV_TOKEN",),
 }
 LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
 # OpenCode Zen 免密车道: 固定公开 token, 不需要任何环境变量
 FREE_PROVIDER = "opencode-zen-free"
+# 片尾视觉 CLI 车道: DeepSeek 网页版「识图模式」(走登录 token, 不需要 API key)
+VISION_CLI_PROVIDER = "deepseek-vision-cli"
 
 
 def _env_or_envfile(name):
@@ -982,12 +994,13 @@ def _free_lane_post(pcfg, payload, timeout):
 
 
 def vision_providers(cfg):
-    """视觉 provider 优先级(固定): MiMo 免密 -> opencode-go -> DeepSeek 官方 API
+    """视觉 provider 优先级(固定): MiMo 免密 -> opencode-go -> deepseek-vision-cli -> DeepSeek 官方 API
 
-    识图不走 deepseek-chat-cli (网页版 CLI 不支持图片输入)。
+    deepseek-vision-cli (dsv.py) 走 DeepSeek 网页版「识图模式」, 用登录 token,
+    不消耗 API 额度; 多帧一次会话发送, 用后即删。
     """
     out = []
-    for k in ("vision_free", "vision", "vision_fallback"):
+    for k in ("vision_free", "vision", "vision_cli", "vision_fallback"):
         p = cfg.get(k)
         if not p or not p.get("enabled", True):
             continue
@@ -1085,7 +1098,11 @@ def read_ending_hint(cfg, video, video_path=None, force=False):
         try:
             log(f"片尾视觉识别: {provider} ({pcfg.get('model', '')})...")
             t0 = time.time()
-            text = _call_vision_once(pcfg, key, ENDING_PROMPT, picks)
+            if provider == VISION_CLI_PROVIDER:
+                # 网页版识图 CLI: 帧文件直接作为参数传给 dsv.py (多图一次发送)
+                text = _call_dsv(pcfg, key, ENDING_PROMPT, picks)
+            else:
+                text = _call_vision_once(pcfg, key, ENDING_PROMPT, picks)
             rec = {"bvid": bvid, "status": "ok", "ver": ENDING_PROMPT_VER,
                    "provider": provider, "model": pcfg.get("model", ""),
                    "frames": len(picks), "text": text,
@@ -1166,8 +1183,12 @@ def check_vision(cfg):
             continue
         try:
             t0 = time.time()
-            text = _call_vision_once(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
-                                     frames[:1])
+            if provider == VISION_CLI_PROVIDER:
+                text = _call_dsv(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
+                                 frames[:1])
+            else:
+                text = _call_vision_once(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
+                                         frames[:1])
             log(f"✅ 视觉预检 {provider} ({pcfg.get('model', '')}) 可用 "
                 f"{time.time() - t0:.1f}s: {text[:60]!r}")
             ok_any = True
@@ -1322,21 +1343,31 @@ def _call_llm_once(pcfg, api_key, system, user):
     return j["choices"][0]["message"]["content"].strip()
 
 
-def _find_dsc_path(pcfg):
-    """定位 deepseek-chat-cli 的 dsc.py"""
-    rel = pcfg.get("path", "_repo/deepseek-chat-cli")
+def _find_cli_path(pcfg, fname, dirname):
+    """定位 CLI 仓库的入口脚本 (dsc.py / dsv.py)"""
+    rel = pcfg.get("path", "_repo/" + dirname)
     cands = []
     if os.path.isabs(rel):
         cands.append(rel)
     else:
         cands.append(os.path.join(WORKDIR, rel))
-    for extra in ("_repo/deepseek-chat-cli", "tools/deepseek-chat-cli", "deepseek-chat-cli"):
+    for extra in ("_repo/" + dirname, "tools/" + dirname, dirname):
         cands.append(os.path.join(WORKDIR, extra))
     for d in cands:
-        f = os.path.join(d, "dsc.py")
+        f = os.path.join(d, fname)
         if os.path.isfile(f):
             return f
     return None
+
+
+def _find_dsc_path(pcfg):
+    """定位 deepseek-chat-cli 的 dsc.py"""
+    return _find_cli_path(pcfg, "dsc.py", "deepseek-chat-cli")
+
+
+def _find_dsv_path(pcfg):
+    """定位 deepseek-vision-cli 的 dsv.py"""
+    return _find_cli_path(pcfg, "dsv.py", "deepseek-vision-cli")
 
 
 def _repo_slug(repo):
@@ -1377,6 +1408,21 @@ def _clone_dsc(pcfg):
         return True
     except Exception as e:
         log(f"⚠️ git clone 失败: {e}")
+    return False
+
+
+def _clone_dsv(pcfg):
+    """克隆 deepseek-vision-cli (公开仓库, 零额外依赖: iSH 用系统 minis-browser-use / Windows 用 playwright+Edge)"""
+    repo = pcfg.get("repo", "https://github.com/menghuanshiguang/deepseek-vision-cli.git")
+    rel = pcfg.get("path", "_repo/deepseek-vision-cli")
+    dest = rel if os.path.isabs(rel) else os.path.join(WORKDIR, rel)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    try:
+        subprocess.run(["git", "clone", "--depth", "1", repo, dest],
+                       check=True, capture_output=True, timeout=180)
+        return True
+    except Exception as e:
+        log(f"⚠️ git clone deepseek-vision-cli 失败: {e}")
     return False
 
 
@@ -1435,6 +1481,74 @@ def _call_dsc(pcfg, token, prompt):
     # dsc.py 超时时会输出 "(超时未获取回答)" 且退出码为 0, 必须识别为失败并继续兜底
     if "超时未获取回答" in out or "未获取回答" in out:
         raise RuntimeError("deepseek-chat-cli 超时未获取回答")
+    return out
+
+
+def _call_dsv(pcfg, token, prompt, images):
+    """调用 deepseek-vision-cli (dsv.py): DeepSeek 网页版「识图模式」, 多帧一次会话发送
+
+    images: 本地图片路径列表 (帧文件), 与 prompt 一起作为 dsv.py 参数。
+    """
+    dsv_py = _find_dsv_path(pcfg)
+    if not dsv_py:
+        log("⏬ deepseek-vision-cli 未找到, 尝试克隆...")
+        if not _clone_dsv(pcfg):
+            raise RuntimeError("deepseek-vision-cli 克隆失败")
+        dsv_py = _find_dsv_path(pcfg)
+        if not dsv_py:
+            raise RuntimeError("克隆后仍未找到 dsv.py")
+
+    tok = (token or "").strip().lstrip("\ufeff")
+    if not tok:
+        # 兜底: 直接读仓库自带的 .dsv_token
+        repo_tok = os.path.join(os.path.dirname(dsv_py), ".dsv_token")
+        if os.path.exists(repo_tok):
+            with open(repo_tok, "r", encoding="utf-8-sig") as f:
+                tok = f.read().strip()
+    if not tok:
+        raise RuntimeError("deepseek-vision-cli: 未找到 DSV_TOKEN")
+
+    # dsv.py 固定读 ~/.dsv_token, 把系统变量写进去 (与 deepseek-chat-cli 共用同一登录态)
+    with open(os.path.expanduser("~/.dsv_token"), "w", encoding="utf-8") as f:
+        f.write(tok)
+
+    # 每次调用使用全新浏览器 profile, 避免连续多次调用后检测退化导致超时 (与 dsc 同策略)
+    import uuid
+    profile_dir = os.path.join(WORKDIR, "data", "dsv_profiles", uuid.uuid4().hex)
+    os.makedirs(profile_dir, exist_ok=True)
+
+    cmd = [sys.executable, os.path.abspath(dsv_py)]
+    cmd += [os.path.abspath(p) for p in images]
+    cmd.append(prompt)
+    log(f"调用 deepseek-vision-cli ({os.path.basename(dsv_py)}, {len(images)}帧)...")
+    # dsv.py 支持 DSV_TIMEOUT 控制回答等待时长; DSV_EDGE_PROFILE 指定本次全新 profile (Windows)
+    env = dict(os.environ)
+    env["DSV_TIMEOUT"] = str(pcfg.get("timeout", 240))
+    env["DSV_EDGE_PROFILE"] = profile_dir
+    try:
+        res = subprocess.run(cmd, cwd=os.path.dirname(dsv_py), capture_output=True,
+                             text=True, encoding="utf-8", errors="replace",
+                             timeout=pcfg.get("timeout", 240) + 90, env=env)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("deepseek-vision-cli 调用超时")
+    finally:
+        # 用完即删, 避免 data/dsv_profiles 无限膨胀
+        shutil.rmtree(profile_dir, ignore_errors=True)
+    if res.returncode != 0:
+        tail = (res.stderr or res.stdout or "").strip()[-500:]
+        if res.returncode == 4:
+            raise RuntimeError(f"deepseek-vision-cli: DSV_TOKEN 无效/缺失, 需重新登录: {tail}")
+        if res.returncode == 5:
+            raise RuntimeError(f"deepseek-vision-cli: 另一个 dsv 正在运行(锁占用): {tail}")
+        raise RuntimeError(f"deepseek-vision-cli 失败 exit={res.returncode}: {tail}")
+    out = (res.stdout or "").strip()
+    if not out:
+        raise RuntimeError("deepseek-vision-cli 返回空内容")
+    # dsv.py 超时/被拒时会以退出码 0 输出提示文本, 必须识别为失败并继续兜底
+    if "超时未获取回答" in out or "未获取回答" in out:
+        raise RuntimeError("deepseek-vision-cli 超时未获取回答")
+    if "DeepSeek拒绝处理" in out:
+        raise RuntimeError(f"deepseek-vision-cli 内容被拒: {out[:200]}")
     return out
 
 

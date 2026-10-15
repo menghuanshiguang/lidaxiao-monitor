@@ -110,7 +110,7 @@ git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 # 🆓 AI 分析: 什么都不配也能跑 —— 免密免费层默认置顶 (mimo-v2.6-flash-free)
 #    想走更稳的付费兜底链再配 (全部可选, 缺谁自动跳过谁):
 echo "OPENCODE_GO_API_KEY=sk-xxxx" >> .env   # 主通道 OpenCode Zen Go
-echo "DSV_TOKEN=xxxx" >> .env                # 第二兜底 deepseek-chat-cli
+echo "DSV_TOKEN=xxxx" >> .env                # 网页版兜底: 文本 deepseek-chat-cli / 片尾识图 deepseek-vision-cli
 echo "DEEPSEEK_API_KEY=sk-xxxx" >> .env      # 最后兜底 DeepSeek 官方
 
 # B站扫码登录 (建议: 解锁高清 + 降低 412 风控)
@@ -142,10 +142,10 @@ python monitor.py --check-vision   # 自检片尾视觉通道 (不下载不分�
 |--------|------|------|
 | `BILIBILI_COOKIES_B64` | ✅ 必需 | B站登录 cookies(base64),下载/风控用 |
 | `OPENCODE_GO_API_KEY` | 可选 | OpenCode Zen Go API(AI 主通道,模型 `deepseek-flash`) |
-| `DSV_TOKEN` | 可选 | DeepSeek 网页版 token(第二兜底 deepseek-chat-cli) |
+| `DSV_TOKEN` | 可选 | DeepSeek 网页版 token(文本第二兜底 `deepseek-chat-cli` + 片尾识图 `deepseek-vision-cli`) |
 | `DEEPSEEK_API_KEY` | 可选 | DeepSeek 官方 API(最后兜底) |
 
-> 🆓 **三个 AI 密钥一个都不配也能跑**:免密免费层(`opencode-zen-free`)默认开启,文本 + 识图全覆盖。`deepseek-chat-cli` 仓库已公开,Actions 直接克隆,无需 PAT。
+> 🆓 **三个 AI 密钥一个都不配也能跑**:免密免费层(`opencode-zen-free`)默认开启,文本 + 识图全覆盖。`deepseek-chat-cli` / `deepseek-vision-cli` 仓库均已公开,Actions 直接克隆,无需 PAT。
 
 ```bash
 gh secret set BILIBILI_COOKIES_B64 --repo <your>/lidaxiao-monitor
@@ -181,9 +181,16 @@ python lidaxiao.py --daemon        # 或 python local_daemon.py / local_daemon_t
 | 4 | DeepSeek 官方 API | `deepseek` | `deepseek-flash` | `DEEPSEEK_API_KEY` |
 | — | 本地模式(`LIDAXIAO_LOCAL=1`) | `ollama` | `batiai/qwen3.6-35b:iq3` | 无需密钥 |
 
-**片尾视觉固定优先级**(`vision_providers`,网页版 CLI 不支持图片,识图不经过第 3 级):
+**片尾视觉固定优先级**(`vision_providers`,任一级失败/无密钥自动降级):
 
-`vision_free`(MiMo 免密) → `vision`(opencode-go `deepseek-flash`) → `vision_fallback`(DeepSeek 官方 `deepseek-flash`)
+| # | 通道 | provider | 密钥 |
+|---|------|----------|------|
+| 1 | 🆓 MiMo 免密 | `opencode-zen-free` | **无需任何密钥** |
+| 2 | OpenCode Zen Go | `opencode-go` | `OPENCODE_GO_API_KEY` |
+| 3 | [deepseek-vision-cli](https://github.com/menghuanshiguang/deepseek-vision-cli)(网页版「识图模式」) | `deepseek-vision-cli` | `DSV_TOKEN` |
+| 4 | DeepSeek 官方 API | `deepseek` | `DEEPSEEK_API_KEY` |
+
+> 第 3 级由 `dsv.py` 驱动浏览器走 DeepSeek 网页版**识图模式**(真·多模态非 OCR),多帧一次会话发送、用后即删;iSH 用系统 `minis-browser-use`,Windows 用 playwright + 系统 Edge,零浏览器下载。`config.json` 里 `"vision_cli": {"enabled": false}` 可单独关闭。
 
 > 🔧 **免密层协议细节**(实测自 `zouyuxuan122/dsh-our-free-model`):必须 `stream:true`(非流式 500/403);body 要带 bash/glob/grep/read 四个最小诱饵 tools + `tool_choice:none`;`reasoning_effort` 是空操作,思考与正文抢 `max_tokens` 所以预算靠顶满 `max_tokens`;免费额度按 session 计,`ses_`/`msg_` id 用 sha256 稳定派生。以上均已内置,无需配置。
 >
@@ -286,9 +293,9 @@ A: 400 条样本统计:日均 3.67 条,高峰 10-15 时(40%)与 18-23 时(43%),�
 
 ## 🧩 技术栈
 
-[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧/时长校验) · RapidOCR + onnxruntime-directml(OCR) · AI: 🆓 OpenCode Zen 免密层(`mimo-v2.6-flash-free`) → [OpenCode Zen Go](https://opencode.ai)(`deepseek-flash`) → [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli) → DeepSeek 官方 API · 本地 Ollama(`qwen3.6-35b`) · GitHub Actions + 本地守护进程
+[bilidown CLI](https://github.com/menghuanshiguang/bilibili-downloader-cli)(B站反爬/下载) · ffmpeg(抽帧/片尾取帧/时长校验) · RapidOCR + onnxruntime-directml(OCR) · AI: 🆓 OpenCode Zen 免密层(`mimo-v2.6-flash-free`) → [OpenCode Zen Go](https://opencode.ai)(`deepseek-flash`) → [deepseek-chat-cli](https://github.com/menghuanshiguang/deepseek-chat-cli) / [deepseek-vision-cli](https://github.com/menghuanshiguang/deepseek-vision-cli) → DeepSeek 官方 API · 本地 Ollama(`qwen3.6-35b`) · GitHub Actions + 本地守护进程
 
-> **调用优先级**:文本 `免费层 → opencode-go → deepseek-chat-cli → DeepSeek 官方`;片尾识图 `免费层 → opencode-go → DeepSeek 官方`。每一级失败/无密钥自动降级,日志里能看到实际用了谁。
+> **调用优先级**:文本 `免费层 → opencode-go → deepseek-chat-cli → DeepSeek 官方`;片尾识图 `免费层 → opencode-go → deepseek-vision-cli → DeepSeek 官方`。每一级失败/无密钥自动降级,日志里能看到实际用了谁。
 
 ## ⚖️ 免责声明
 
