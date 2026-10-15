@@ -1,0 +1,36 @@
+name: Vision Self-Test (片尾视觉链自检)
+
+# 手动触发: 只跑 --check-vision, 逐级打印片尾视觉通道可用性
+# 覆盖: MiMo免密 / opencode-go / deepseek-vision-cli(Windows+playwright+系统Edge) / DeepSeek官方
+on:
+  workflow_dispatch:
+
+jobs:
+  vision:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install --disable-pip-version-check requests pillow playwright
+        shell: pwsh
+
+      - name: Clone deepseek-vision-cli (public)
+        run: git clone --depth 1 https://github.com/menghuanshiguang/deepseek-vision-cli.git _repo/deepseek-vision-cli
+
+      - name: Vision preflight
+        shell: pwsh
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
+          PYTHONIOENCODING: utf-8
+        run: python monitor.py --check-vision
