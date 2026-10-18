@@ -153,7 +153,7 @@ gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor   # 可选
 ```
 
 - 每天 **北京时间 14:40 / 20:00** 自动运行;手动 `Run workflow` 可勾选 **`force`** 输入强制重处理最新视频
-- 运行前有**非阻断视觉预检**(`--check-vision`),额度/密钥问题提前打进日志,失败只跳过【片尾暗示】小节
+- 视觉自检改为**手动触发**:`workflow_dispatch` 跑 `vision-selftest.yml`,或本地 `python monitor.py --check-vision`;定时任务不再预检(少一次 dsv 调用、省约 60s,也少一次风控暴露)
 - 状态走 Actions 缓存,无新视频秒退;报告 + `state/` 自动提交(`[skip ci]`),另上传 artifact 保留 14 天
 
 ### 本地: 守护进程与云端无缝错峰

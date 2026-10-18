@@ -19,7 +19,7 @@
   python monitor.py --force    # 强制重新处理最新视频
   python monitor.py --uid 2137589551 --limit 10
   python monitor.py --config config.json
-  python monitor.py --check-vision   # 仅自检片尾视觉通道 (Actions 预检用)
+  python monitor.py --check-vision   # 仅自检片尾视觉通道 (手动自检用)
 
 退出码: 0=正常(含无更新)  1=出错
 """
@@ -1152,7 +1152,7 @@ def ending_md(rec):
 
 
 def check_vision(cfg):
-    """预检视觉通道: 打印每个 provider 的可用性 (Actions 里非阻断自检)"""
+    """自检视觉通道: 打印每个 provider 的可用性 (手动排障用, 定时任务不再调用)"""
     vcfg = cfg.get("vision") or {}
     if not vcfg.get("enabled", True):
         log("片尾视觉已禁用 (config.json vision.enabled=false), 跳过预检")
