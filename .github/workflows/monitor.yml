@@ -38,8 +38,55 @@ jobs:
         shell: pwsh
 
       - name: Install ffmpeg
-        run: choco install ffmpeg -y --no-progress
         shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ProgressPreference = "SilentlyContinue"
+
+          function Test-FFmpeg {
+            try {
+              & ffmpeg -version *> $null
+              & ffprobe -version *> $null
+              return $true
+            } catch {
+              return $false
+            }
+          }
+
+          if (Test-FFmpeg) {
+            Write-Host "ffmpeg already available"
+            exit 0
+          }
+
+          # 1) Chocolatey（可能遇到源 503 / 包解析失败）
+          try {
+            choco install ffmpeg -y --no-progress
+          } catch {
+            Write-Host "choco install failed: $_"
+          }
+          if (Test-FFmpeg) {
+            Write-Host "ffmpeg installed via choco"
+            exit 0
+          }
+
+          # 2) 静态包兜底（GitHub Release，不依赖 chocolatey 源）
+          $zip = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          $dst = Join-Path $env:RUNNER_TEMP "ffmpeg-static"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Write-Host "choco unavailable, downloading static ffmpeg..."
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath $dst -Force
+          $exe = Get-ChildItem -Path $dst -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "ffmpeg.exe not found in static package" }
+          $binDir = $exe.Directory.FullName
+          $binDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH = "$binDir;$env:PATH"
+
+          # 3) 最终校验：装不上就让 job 失败，绝不静默
+          if (-not (Test-FFmpeg)) { throw "ffmpeg/ffprobe still missing after static install" }
+          & ffmpeg -version | Select-Object -First 1
+          & ffprobe -version | Select-Object -First 1
+          Write-Host "ffmpeg ready: $binDir"
 
       - name: Clone bilidown CLI
         run: |

@@ -488,7 +488,8 @@ def download_video(cfg, bvid, retries=None):
             timeout=900)
         ok = rc == 0
         if not ok:
-            log(f"下载失败(第{i+1}/{attempts}次) rc={rc}\n{err[-600:]}")
+            log(f"下载失败(第{i+1}/{attempts}次) rc={rc}\n"
+                f"stdout: {out[-600:]}\nstderr: {err[-600:]}")
             if i + 1 < attempts:
                 time.sleep(5)
             continue
