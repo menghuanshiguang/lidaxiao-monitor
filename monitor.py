@@ -495,6 +495,10 @@ def download_video(cfg, bvid, retries=None):
             continue
         existing = find_downloaded_mp4(bvid)
         if existing:
+            # 成功时也记下 CDN 回退过程: 哪条直链不可达、最终由哪个备用源供流
+            for line in out.splitlines():
+                if "直链失败" in line or "备用源可用" in line:
+                    log(line.strip())
             log(f"✅ 下载完成: {existing}")
             return existing
         log(f"bilidown 返回成功但未找到mp4 (第{i+1}次)\n{out[-300:]}\n{err[-300:]}")
