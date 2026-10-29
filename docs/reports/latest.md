@@ -5,18 +5,42 @@
 
 
 
-- 视频《投资中的顺境和逆境》: 李大霄以韩国三星、海力士“连续横8天”为全球股市传导链的观察起点，认为极度悲观处往往是底部、万点论狂热处往往是顶部，核心劝诫是顺境不忘形、逆境不绝望、任何情况下都不加杠杆。
-- 视频《困难时的关怀》: 李大霄以韩国30多万人爆仓为引子，呼吁建立投资者心理关怀与救济机制，核心是劝投资者用余钱投资、量力而为、扛住周期性波动，并强调生活身体家人亲情比投资重要。
 
 ## 视频清单
+- [21:06] 调整的原因 (BV1kcxw66EjG) 04:27
 - [18:14] 低位的误判 (BV1QExF6nEaq) 03:55
 - [17:56] 建议美股成立退市补偿基金 (BV16FxF6YEh7) 04:34
 - [16:32] 美联储会议制度改革 (BV1xhxF6GE9U) 06:55
-- [12:44] 要尊重粉丝 (BV1uFsf6yEvz) 03:11
-- [12:25] 投资中的顺境和逆境 (BV1KKsf66ED1) 03:05
-- [10:45] 困难时的关怀 (BV1owsd61EFB) 03:04
 
-## 视频1:《困难时的关怀》 (BV1owsd61EFB)
+## 视频1:《美联储会议制度改革》 (BV1xhxF6GE9U)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+
+## 视频2:《建议美股成立退市补偿基金》 (BV16FxF6YEh7)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+
+## 视频3:《低位的误判》 (BV1QExF6nEaq)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+
+## 视频4:《调整的原因》 (BV1kcxw66EjG)
+
+> ⚠️ AI分析失败, 仅保留字幕
+
+> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
+
+## 视频5:《困难时的关怀》 (BV1owsd61EFB)
 
 【一句话摘要】李大霄以韩国30多万人爆仓为引子，呼吁建立投资者心理关怀与救济机制，核心是劝投资者用余钱投资、量力而为、扛住周期性波动，并强调生活身体家人亲情比投资重要。
 
@@ -114,7 +138,8 @@
 
 以上为李大霄个人观点提炼,不构成投资建议
 
-## 视频2:《投资中的顺境和逆境》 (BV1KKsf66ED1)
+
+## 视频6:《投资中的顺境和逆境》 (BV1KKsf66ED1)
 
 【一句话摘要】李大霄以韩国三星、海力士“连续横8天”为全球股市传导链的观察起点，认为极度悲观处往往是底部、万点论狂热处往往是顶部，核心劝诫是顺境不忘形、逆境不绝望、任何情况下都不加杠杆。
 
@@ -211,7 +236,8 @@
 
 以上为李大霄个人观点提炼,不构成投资建议
 
-## 视频3:《要尊重粉丝》 (BV1uFsf6yEvz)
+
+## 视频7:《要尊重粉丝》 (BV1uFsf6yEvz)
 
 (未找到输入框: 站点改版或页面未加载完成 - 检查 README 选择器契约)
 
@@ -226,22 +252,4 @@
 【片尾暗示】片尾通过背景中的熊猫玩偶传递熊市信号，与口播中安抚投资者“几万块没什么大不了”的冷静态度形成呼应，但整体文字卡片（声明与荐书）未直接提示行情方向，画面隐喻偏向看空。
 
 以上为李大霄个人观点提炼,不构成投资建议
-
-## 视频4:《美联储会议制度改革》 (BV1xhxF6GE9U)
-
-> ⚠️ AI分析失败, 仅保留字幕
-
-> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
-
-## 视频5:《建议美股成立退市补偿基金》 (BV16FxF6YEh7)
-
-> ⚠️ AI分析失败, 仅保留字幕
-
-> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
-
-## 视频6:《低位的误判》 (BV1QExF6nEaq)
-
-> ⚠️ AI分析失败, 仅保留字幕
-
-> ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
 
