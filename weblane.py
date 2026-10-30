@@ -218,7 +218,12 @@ def guard(cfg: dict | None):
     except ImportError as e:
         raise WebLaneError(
             f"缺少策略层 dsv_guard.py ({e}). 网页版通道必须带预算/冷却才能用, 拒绝在无保护状态下调用。")
-    g = dsv_guard.Guard(path=path)
+    # 策略层的配置/锁错误统一暴露成通道错误: 调用方只需要认识 WebLaneError 一种失败。
+    guard_err = getattr(dsv_guard, "GuardError", ())
+    try:
+        g = dsv_guard.Guard(path=path)
+    except guard_err as e:
+        raise WebLaneError(f"策略层初始化失败: {e}")
     _GUARDS[path] = g
     return g
 
