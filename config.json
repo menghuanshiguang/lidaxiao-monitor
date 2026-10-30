@@ -66,5 +66,25 @@
     "model": "deepseek-flash",
     "max_tokens": 6000,
     "timeout": 240
+  },
+  "web_lane": {
+    "_comment": "DeepSeek 网页版通道(deepseek-chat-cli / deepseek-vision-cli)的闸门。默认关闭: 网页版登录态是有限资源, 只在本地兜底时按预算开, 绝不在 CI 里开。",
+    "enabled": true,
+    "allow_headless": false,
+    "allow_ci": false,
+    "keep_session": true,
+    "profile_root": "data/profiles",
+    "accounts_file": "web_accounts.json",
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
+    "viewport": [
+      1366,
+      900
+    ],
+    "locale": "zh-CN",
+    "timezone": "Asia/Shanghai",
+    "jitter_s": [
+      3,
+      11
+    ]
   }
 }
