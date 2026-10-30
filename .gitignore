@@ -28,3 +28,9 @@ Desktop.ini
 
 # ¡Ÿ ±≤‚ ‘
 _setup/_test_clone/
+
+# web-lane hardening (weblane / dsv_guard)
+/web_accounts.json
+/dsv_audit.jsonl
+/dsv_guard_state.json
+/data/profiles/
