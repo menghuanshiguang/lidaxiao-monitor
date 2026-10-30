@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "账号表 == 策略层 dsv_guard.py 的配置文件, 也是 weblane 取 token/预算的唯一来源。",
+    "复制成 web_accounts.json 再改; web_accounts.json 不进仓库(.gitignore)。"
+  ],
+  "_rules": [
+    "一个账号 = 一个真人 = 一个出口。同一 token 不要登记到两个 egress(guard 会拒绝换线)。",
+    "egress 是出口标签: 家宽写 home-cn, 日本 VPS 写 vps-jp-1, CI 写 ci-us。",
+    "token_env 指向环境变量(推荐), token_file 指向文件; 不要把 token 明文写进来。",
+    "daily_budget 是'这个账号每天最多被自动化调用几次'。平台没有配额, 只有封号。",
+    "enabled=false 可以让 guard 跳过某账号而不删配置。"
+  ],
+  "defaults": {
+    "daily_budget": 6,
+    "hourly_budget": 2,
+    "min_interval_s": 600,
+    "max_wait_s": 180,
+    "poll_interval_s": 5,
+    "cooldown_ladder_s": [3600, 21600, 86400, 259200],
+    "reservation_ttl_s": 1800,
+    "locale": "zh-CN",
+    "accept_lang": "zh-CN,zh;q=0.9,en;q=0.8",
+    "timezone": "Asia/Shanghai",
+    "window_size": "1366,900",
+    "window_position": "60,60",
+    "device_scale_factor": 1.0,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
+    "extra_flags": [],
+    "profiles_dir": "data/profiles",
+    "headless_flag": "--headless=new"
+  },
+  "accounts": [
+    {
+      "id": "main-home",
+      "egress": "home-cn",
+      "enabled": true,
+      "token_env": "DSV_TOKEN",
+      "daily_budget": 6,
+      "hourly_budget": 2,
+      "min_interval_s": 600,
+      "notes": "主力账号, 家宽出口。禁言期满后先只人工使用, 第 4 天再纳入自动化。"
+    },
+    {
+      "id": "spare-home",
+      "egress": "home-cn",
+      "enabled": true,
+      "token_env": "DSV_TOKEN_SPARE",
+      "daily_budget": 3,
+      "hourly_budget": 1,
+      "min_interval_s": 900,
+      "notes": "备用账号: 只在 main-home 冷却/预算耗尽时接单, 平时不动。"
+    }
+  ]
+}
