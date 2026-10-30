@@ -68,10 +68,10 @@
     "timeout": 240
   },
   "web_lane": {
-    "_comment": "DeepSeek 网页版通道(deepseek-chat-cli / deepseek-vision-cli)的闸门。默认关闭: 网页版登录态是有限资源, 只在本地兜底时按预算开, 绝不在 CI 里开。",
+    "_comment": "DeepSeek 网页版通道(deepseek-chat-cli / deepseek-vision-cli)的闸门。enabled=true 为总开关; allow_ci=true 允许在 CI 里跑(出口必须登记为 ci-us); 预算/冷却由 dsv_guard 统一裁决, 开机不等于放开刷。",
     "enabled": true,
-    "allow_headless": false,
-    "allow_ci": false,
+    "allow_headless": true,
+    "allow_ci": true,
     "keep_session": true,
     "profile_root": "data/profiles",
     "accounts_file": "web_accounts.json",

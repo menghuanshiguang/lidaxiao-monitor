@@ -127,10 +127,50 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
-      - name: Verify web-lane gate (hardening acceptance test)
+      - name: Write web-lane accounts (egress ci-us)
+        shell: pwsh
+        run: |
+          # web_accounts.json 不进仓库(.gitignore), 云端运行时生成。
+          # 关键: 这个账号的 egress 登记为 ci-us —— 与家宽出口彻底隔离,
+          # 不会出现"同一 token 两个出口"的最高权重风控信号。
+          $acct = @'
+          {
+            "defaults": {
+              "daily_budget": 8,
+              "hourly_budget": 3,
+              "min_interval_s": 600,
+              "max_wait_s": 180,
+              "cooldown_ladder_s": [3600, 21600, 86400, 259200],
+              "locale": "zh-CN",
+              "accept_lang": "zh-CN,zh;q=0.9,en;q=0.8",
+              "timezone": "Asia/Shanghai",
+              "window_size": "1366,900"
+            },
+            "accounts": [
+              {
+                "id": "ci-us-1",
+                "egress": "ci-us",
+                "enabled": true,
+                "token_env": "DSV_TOKEN",
+                "daily_budget": 8,
+                "hourly_budget": 3,
+                "min_interval_s": 600,
+                "allowed_kinds": ["text", "vision"],
+                "notes": "云端 Actions 专用出口。token 只登记在 ci-us, 本地用同一 token 需先 reset。"
+              }
+            ]
+          }
+          '@
+          Set-Content -Path web_accounts.json -Value $acct -Encoding utf8NoBOM
+          python -c "import json;d=json.load(open('web_accounts.json'));print('accounts:',[(a['id'],a['egress']) for a in d['accounts']])"
+
+      - name: Verify web-lane gate (explicitly allowed)
         shell: pwsh
         env:
           PYTHONIOENCODING: utf-8
+          GATE_EXPECT: enabled
+          WEB_LANE_ALLOW_CI: "1"
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
         run: python _setup/verify_gate.py
 
       - name: Run unified monitor (local/cloud adaptive)
@@ -140,6 +180,10 @@ jobs:
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
+          # 网页版通道显式放行(出口已登记为 ci-us, 与家宽隔离);
+          # 预算/冷却仍由 dsv_guard 裁决, 这里只解闸门不解预算。
+          WEB_LANE_ALLOW_CI: "1"
+          WEB_LANE_HEADFUL: "0"
         run: |
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
