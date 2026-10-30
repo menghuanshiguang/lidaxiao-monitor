@@ -127,6 +127,12 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
+      - name: Verify web-lane gate (hardening acceptance test)
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python _setup/verify_gate.py
+
       - name: Run unified monitor (local/cloud adaptive)
         env:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
