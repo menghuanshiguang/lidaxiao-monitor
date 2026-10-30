@@ -39,6 +39,11 @@ import time
 import urllib.parse
 import urllib.request
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+import weblane  # noqa: E402  网页版通道唯一入口(账号池/预算/冷却/稳定指纹)
+
 # ---------- 常量 ----------
 WORKDIR = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(WORKDIR, "state")   # 云端/本地共享状态, 入库同步
@@ -1107,7 +1112,7 @@ def read_ending_hint(cfg, video, video_path=None, force=False):
             t0 = time.time()
             if provider == VISION_CLI_PROVIDER:
                 # 网页版识图 CLI: 帧文件直接作为参数传给 dsv.py (多图一次发送)
-                text = _call_dsv(pcfg, key, ENDING_PROMPT, picks)
+                text = _call_dsv(cfg, pcfg, key, ENDING_PROMPT, picks)
             else:
                 text = _call_vision_once(pcfg, key, ENDING_PROMPT, picks)
             rec = {"bvid": bvid, "status": "ok", "ver": ENDING_PROMPT_VER,
@@ -1191,7 +1196,7 @@ def check_vision(cfg):
         try:
             t0 = time.time()
             if provider == VISION_CLI_PROVIDER:
-                text = _call_dsv(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
+                text = _call_dsv(cfg, pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
                                  frames[:1])
             else:
                 text = _call_vision_once(pcfg, key, "这张图里有什么文字? 直接回答, 不要解释。",
@@ -1433,7 +1438,7 @@ def _clone_dsv(pcfg):
     return False
 
 
-def _call_dsc(pcfg, token, prompt):
+def _call_dsc(cfg, pcfg, token, prompt):
     """调用 deepseek-chat-cli (dsc.py): 网页版登录 token 走浏览器对话"""
     dsc_py = _find_dsc_path(pcfg)
     if not dsc_py:
@@ -1454,44 +1459,12 @@ def _call_dsc(pcfg, token, prompt):
     if not tok:
         raise RuntimeError("deepseek-chat-cli: 未找到 DSV_TOKEN")
 
-    # dsc.py 固定读 ~/.dsv_token, 把系统变量写进去
-    token_path = os.path.expanduser("~/.dsv_token")
-    with open(token_path, "w", encoding="utf-8") as f:
-        f.write(tok)
-
-    # 根因修复: 每次调用使用全新浏览器 profile, 避免连续多次后 dsc 检测退化导致超时
-    import uuid
-    profile_dir = os.path.join(WORKDIR, "data", "dsc_profiles", uuid.uuid4().hex)
-    os.makedirs(profile_dir, exist_ok=True)
-
-    cmd = [sys.executable, os.path.abspath(dsc_py), prompt]
-    log(f"调用 deepseek-chat-cli ({os.path.basename(dsc_py)})...")
-    # dsc.py 支持 DSC_TIMEOUT 环境变量控制回答等待时长; DSV_EDGE_PROFILE 指定本次全新 profile
-    env = dict(os.environ)
-    env["DSC_TIMEOUT"] = str(pcfg.get("timeout", 300))
-    env["DSV_EDGE_PROFILE"] = profile_dir
-    try:
-        res = subprocess.run(cmd, cwd=os.path.dirname(dsc_py), capture_output=True,
-                             text=True, encoding="utf-8", errors="replace",
-                             timeout=pcfg.get("timeout", 300) + 60, env=env)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("deepseek-chat-cli 调用超时")
-    finally:
-        # 用完即删, 避免 data/dsc_profiles 无限膨胀
-        shutil.rmtree(profile_dir, ignore_errors=True)
-    if res.returncode != 0:
-        raise RuntimeError(
-            f"deepseek-chat-cli 失败 exit={res.returncode}: {(res.stderr or res.stdout)[-500:]}")
-    out = (res.stdout or "").strip()
-    if not out:
-        raise RuntimeError("deepseek-chat-cli 返回空内容")
-    # dsc.py 超时时会输出 "(超时未获取回答)" 且退出码为 0, 必须识别为失败并继续兜底
-    if "超时未获取回答" in out or "未获取回答" in out:
-        raise RuntimeError("deepseek-chat-cli 超时未获取回答")
-    return out
+    # dsc.py 固定读 ~/.dsv_token, 实际写入/账号选择/预算/冷却/稳定 profile 全部交给 weblane:
+    # 网页版登录态是有限资源, 不允许这里直连浏览器(详见 weblane.py 顶部设计红线)。
+    return weblane.chat(cfg, pcfg, tok, prompt, dsc_py=os.path.abspath(dsc_py))
 
 
-def _call_dsv(pcfg, token, prompt, images):
+def _call_dsv(cfg, pcfg, token, prompt, images):
     """调用 deepseek-vision-cli (dsv.py): DeepSeek 网页版「识图模式」, 多帧一次会话发送
 
     images: 本地图片路径列表 (帧文件), 与 prompt 一起作为 dsv.py 参数。
@@ -1515,48 +1488,8 @@ def _call_dsv(pcfg, token, prompt, images):
     if not tok:
         raise RuntimeError("deepseek-vision-cli: 未找到 DSV_TOKEN")
 
-    # dsv.py 固定读 ~/.dsv_token, 把系统变量写进去 (与 deepseek-chat-cli 共用同一登录态)
-    with open(os.path.expanduser("~/.dsv_token"), "w", encoding="utf-8") as f:
-        f.write(tok)
-
-    # 每次调用使用全新浏览器 profile, 避免连续多次调用后检测退化导致超时 (与 dsc 同策略)
-    import uuid
-    profile_dir = os.path.join(WORKDIR, "data", "dsv_profiles", uuid.uuid4().hex)
-    os.makedirs(profile_dir, exist_ok=True)
-
-    cmd = [sys.executable, os.path.abspath(dsv_py)]
-    cmd += [os.path.abspath(p) for p in images]
-    cmd.append(prompt)
-    log(f"调用 deepseek-vision-cli ({os.path.basename(dsv_py)}, {len(images)}帧)...")
-    # dsv.py 支持 DSV_TIMEOUT 控制回答等待时长; DSV_EDGE_PROFILE 指定本次全新 profile (Windows)
-    env = dict(os.environ)
-    env["DSV_TIMEOUT"] = str(pcfg.get("timeout", 240))
-    env["DSV_EDGE_PROFILE"] = profile_dir
-    try:
-        res = subprocess.run(cmd, cwd=os.path.dirname(dsv_py), capture_output=True,
-                             text=True, encoding="utf-8", errors="replace",
-                             timeout=pcfg.get("timeout", 240) + 90, env=env)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("deepseek-vision-cli 调用超时")
-    finally:
-        # 用完即删, 避免 data/dsv_profiles 无限膨胀
-        shutil.rmtree(profile_dir, ignore_errors=True)
-    if res.returncode != 0:
-        tail = (res.stderr or res.stdout or "").strip()[-500:]
-        if res.returncode == 4:
-            raise RuntimeError(f"deepseek-vision-cli: DSV_TOKEN 无效/缺失, 需重新登录: {tail}")
-        if res.returncode == 5:
-            raise RuntimeError(f"deepseek-vision-cli: 另一个 dsv 正在运行(锁占用): {tail}")
-        raise RuntimeError(f"deepseek-vision-cli 失败 exit={res.returncode}: {tail}")
-    out = (res.stdout or "").strip()
-    if not out:
-        raise RuntimeError("deepseek-vision-cli 返回空内容")
-    # dsv.py 超时/被拒时会以退出码 0 输出提示文本, 必须识别为失败并继续兜底
-    if "超时未获取回答" in out or "未获取回答" in out:
-        raise RuntimeError("deepseek-vision-cli 超时未获取回答")
-    if "DeepSeek拒绝处理" in out:
-        raise RuntimeError(f"deepseek-vision-cli 内容被拒: {out[:200]}")
-    return out
+    # 与 dsc 同一条网页版通道, 同样交给 weblane(账号池/预算/冷却/稳定 profile)
+    return weblane.vision(cfg, pcfg, tok, prompt, images, dsv_py=os.path.abspath(dsv_py))
 
 
 def call_llm(cfg, api_key, system, user, dsc_prompt=None):
@@ -1574,7 +1507,8 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
             providers.append(free)             # 免费层最前, 挂了自动落到下面三级
         providers.append(cfg.get("llm"))
         cli = cfg.get("llm_cli")
-        if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
+        # 与 vision_providers 对齐: enabled=false 即从链上摘除, 不靠"provider 写重"这种巧合
+        if cli and cli.get("enabled", True) and cli.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(cli)
         fallback = cfg.get("llm_fallback")
         if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
@@ -1593,7 +1527,7 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         try:
             if provider == "deepseek-chat-cli":
                 log(f"调用 LLM {provider}...")
-                out = _call_dsc(pcfg, key, dsc_prompt or f"{system}\n\n{user}")
+                out = _call_dsc(cfg, pcfg, key, dsc_prompt or f"{system}\n\n{user}")
             else:
                 log(f"调用 LLM {provider} ({pcfg.get('model', '')})...")
                 out = _call_llm_once(pcfg, key, system, user)
