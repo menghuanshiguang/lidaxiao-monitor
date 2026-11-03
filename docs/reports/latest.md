@@ -24,11 +24,13 @@
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
 
+
 ## 视频2:《宽基ETF成交再放量》 (BV1t54362E9q)
 
 > ⚠️ AI分析失败, 仅保留字幕
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
 
 ## 视频3:《稳市组合拳是好消息》 (BV1uV4367EKQ)
 
@@ -36,11 +38,13 @@
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
 
+
 ## 视频4:《好人要经得起时间的检验》 (BV1xz4g66EgR)
 
 > ⚠️ AI分析失败, 仅保留字幕
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
 
 ## 视频5:《小书的往事》 (BV1884g62Es6)
 
@@ -48,11 +52,13 @@
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
 
+
 ## 视频6:《稳市组合拳的可操作性》 (BV1Ko4u6gEj2)
 
 > ⚠️ AI分析失败, 仅保留字幕
 
 > ⚠️ AI分析失败: deepseek: 402 Client Error: Payment Required for url: https://api.deepseek.com/chat/completions
+
 
 ## 视频7:《40年弹指一挥间》 (BV1z34g6fEcx)
 
