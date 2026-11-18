@@ -1,0 +1,104 @@
+name: LLM Bench (local GGUF)
+
+# 本地小模型评测: 同一份真实字幕 + 生产提示词, 比较输出质量与速度
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: '只跑某个 tag (留空=全部)'
+        type: string
+        default: ''
+
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          pip install --disable-pip-version-check -q yt-dlp rapidocr-onnxruntime requests
+      - name: Build subtitle fixture
+        run: python bench/make_fixture.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixture
+          path: bench/fixture/
+          retention-days: 7
+
+  bench:
+    needs: fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: qwen2.5-1.5b
+            repo: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+            file: qwen2.5-1.5b-instruct-q4_k_m.gguf
+            extra: ''
+          - tag: qwen3-1.7b
+            repo: unsloth/Qwen3-1.7B-GGUF
+            file: Qwen3-1.7B-Q4_K_M.gguf
+            extra: --no-think
+          - tag: minicpm5-2b
+            repo: openbmb/MiniCPM5-2B-GGUF
+            file: MiniCPM5-2B-Q4_K_M.gguf
+            extra: ''
+          - tag: qwen3-4b-instruct-2507
+            repo: unsloth/Qwen3-4B-Instruct-2507-GGUF
+            file: Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+            extra: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixture
+          path: bench/fixture/
+      - name: Install python deps
+        run: pip install --disable-pip-version-check -q requests
+      - name: Get llama.cpp (cpu)
+        run: |
+          curl -sL -o lc.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-ubuntu-x64.tar.gz
+          tar xzf lc.tar.gz
+          DIR=$(dirname "$(find . -name llama-server -type f | head -1)")
+          echo "LLAMA_DIR=$PWD/$DIR" >> "$GITHUB_ENV"
+          "$PWD/$DIR/llama-server" --version || true
+      - name: Download model
+        run: |
+          mkdir -p models
+          curl -L --retry 3 --retry-delay 5 -# -o "models/${{ matrix.file }}" \
+            "https://huggingface.co/${{ matrix.repo }}/resolve/main/${{ matrix.file }}"
+          ls -lh models/
+      - name: Serve + run bench
+        run: |
+          "$LLAMA_DIR/llama-server" -m "models/${{ matrix.file }}" \
+            -c 8192 -t 4 -b 512 -ub 512 --host 127.0.0.1 --port 8080 \
+            --jinja --no-webui > server.log 2>&1 &
+          for i in $(seq 1 180); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null; then echo "server up after ${i}x2s"; break; fi
+            sleep 2
+          done
+          curl -s http://127.0.0.1:8080/v1/models || true
+          python bench/run_bench.py --tag "${{ matrix.tag }}" \
+            --base http://127.0.0.1:8080/v1 \
+            --out "bench/out/${{ matrix.tag }}.md" ${{ matrix.extra }}
+          echo "--- server tail ---"
+          tail -20 server.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out-${{ matrix.tag }}
+          path: |
+            bench/out/
+            server.log
+          retention-days: 7
