@@ -33,6 +33,17 @@
     "num_ubatch": 2816,
     "cache_ram": 8192
   },
+  "llm_local": {
+    "enabled": true,
+    "provider": "local",
+    "base_url": "http://127.0.0.1:8080/v1",
+    "model": "minicpm5-2b",
+    "temperature": 0.3,
+    "max_tokens": 3000,
+    "timeout": 900,
+    "enable_thinking": false,
+    "validate": true
+  },
   "llm_fallback": {
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",

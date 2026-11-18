@@ -132,6 +132,17 @@ def load_config(path=None):
             "max_tokens": 8000,
             "timeout": 600,
         },
+        "llm_local": {                          # 本地权重 (llama.cpp OpenAI 兼容), 校验不过自动回退云端
+            "enabled": False,
+            "provider": "local",
+            "base_url": "http://127.0.0.1:8080/v1",
+            "model": "minicpm5-2b",
+            "temperature": 0.3,
+            "max_tokens": 3000,
+            "timeout": 900,
+            "enable_thinking": False,           # MiniCPM5 混合思考: 关掉防止全花在 reasoning 上
+            "validate": True,                   # 结构校验(6 段 + 结尾声明), 不过就回退
+        },
         "vision_free": {                        # 片尾识别第一层: MiMo 免费视觉车道 (无 key)
             "enabled": True,
             "provider": "opencode-zen-free",
@@ -1347,7 +1358,12 @@ def _call_llm_once(pcfg, api_key, system, user):
     r = requests.post(url, json=payload, timeout=pcfg.get("timeout", 180), headers=headers)
     r.raise_for_status()
     j = r.json()
-    return j["choices"][0]["message"]["content"].strip()
+    msg = j["choices"][0]["message"]
+    content = (msg.get("content") or "").strip()
+    if not content:
+        reason = msg.get("reasoning_content") or ""
+        raise RuntimeError(f"返回空 content (reasoning {len(reason)} chars)")
+    return content
 
 
 def _find_cli_path(pcfg, fname, dirname):
@@ -1579,7 +1595,7 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         fallback = cfg.get("llm_fallback")
         if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(fallback)
-    NO_KEY_PROVIDERS = {"ollama"}
+    NO_KEY_PROVIDERS = {"ollama", "local", "llama"}
     last_err = ""
     for pcfg in providers:
         if not pcfg:
@@ -1600,6 +1616,12 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
             # 任何 provider 返回超时/未获取回答都视为失败, 继续下一个兜底
             if "超时未获取回答" in out or "未获取回答" in out:
                 raise RuntimeError(f"{provider} 返回超时未获取回答")
+            if provider in ("local", "llama") and pcfg.get("validate", True):
+                ok, miss = validate_report(out)
+                if not ok:
+                    log(f"⚠️ 本地模型未过结构校验({', '.join(miss)}), 回退云端")
+                    last_err = f"{provider}: 校验未过 {miss}"
+                    continue
             return out
         except Exception as e:
             last_err = f"{provider}: {e}"
