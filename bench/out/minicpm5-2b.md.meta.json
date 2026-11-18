@@ -1,0 +1,8 @@
+{
+  "tag": "minicpm5-2b",
+  "elapsed": 240.25501775741577,
+  "prompt_tokens": 6368,
+  "completion_tokens": 1029,
+  "chars": 1274,
+  "server": "http://127.0.0.1:8080/v1"
+}

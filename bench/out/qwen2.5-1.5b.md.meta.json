@@ -1,0 +1,8 @@
+{
+  "tag": "qwen2.5-1.5b",
+  "elapsed": 218.0983533859253,
+  "prompt_tokens": 7153,
+  "completion_tokens": 1039,
+  "chars": 1482,
+  "server": "http://127.0.0.1:8080/v1"
+}

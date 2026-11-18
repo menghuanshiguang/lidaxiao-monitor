@@ -25,9 +25,11 @@ ap.add_argument("--out", required=True)
 ap.add_argument("--no-think", action="store_true")
 ap.add_argument("--max-tokens", type=int, default=3000)
 ap.add_argument("--temperature", type=float, default=0.3)
+ap.add_argument("--fixture", default=os.path.join(HERE, "fixture"))
+ap.add_argument("--history-mode", default="full", choices=["full", "none", "trim"])
 args = ap.parse_args()
 
-fx = os.path.join(HERE, "fixture")
+fx = args.fixture
 subtitle = open(os.path.join(fx, "subtitle.txt"), encoding="utf-8").read()
 meta = json.load(open(os.path.join(fx, "meta.json"), encoding="utf-8"))
 

@@ -1,0 +1,66 @@
+name: LLM Bench v2 (controls)
+
+# 对照组: 验证 MiniCPM5-2B 是真读字幕还是背历史, 并给 Qwen 公平条件
+on:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: minicpm-nohist
+            repo: openbmb/MiniCPM5-2B-GGUF
+            file: MiniCPM5-2B-Q4_K_M.gguf
+            extra: '--fixture bench/fixture --history-mode none'
+          - tag: minicpm-trap
+            repo: openbmb/MiniCPM5-2B-GGUF
+            file: MiniCPM5-2B-Q4_K_M.gguf
+            extra: '--fixture bench/fixture2 --history-mode none'
+          - tag: qwen25-trim
+            repo: Qwen/Qwen2.5-1.5B-Instruct-GGUF
+            file: qwen2.5-1.5b-instruct-q4_k_m.gguf
+            extra: '--fixture bench/fixture --history-mode trim'
+          - tag: qwen3-trim
+            repo: unsloth/Qwen3-1.7B-GGUF
+            file: Qwen3-1.7B-Q4_K_M.gguf
+            extra: '--fixture bench/fixture --history-mode trim --no-think'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q requests
+      - name: Get llama.cpp (cpu)
+        run: |
+          curl -sL -o lc.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-ubuntu-x64.tar.gz
+          tar xzf lc.tar.gz
+          DIR=$(dirname "$(find . -name llama-server -type f | head -1)")
+          echo "LLAMA_DIR=$PWD/$DIR" >> "$GITHUB_ENV"
+      - name: Download model
+        run: |
+          mkdir -p models
+          [ -f "models/${{ matrix.file }}" ] || curl -L --retry 3 -# -o "models/${{ matrix.file }}" \
+            "https://huggingface.co/${{ matrix.repo }}/resolve/main/${{ matrix.file }}"
+          ls -lh models/
+      - name: Serve + run bench
+        run: |
+          "$LLAMA_DIR/llama-server" -m "models/${{ matrix.file }}" \
+            -c 8192 -t 4 -b 512 -ub 512 --host 127.0.0.1 --port 8080 \
+            --jinja --no-webui > server.log 2>&1 &
+          for i in $(seq 1 180); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null; then echo "server up ${i}x2s"; break; fi
+            sleep 2
+          done
+          python bench/run_bench.py --tag "${{ matrix.tag }}" \
+            --base http://127.0.0.1:8080/v1 \
+            --out "bench/out/${{ matrix.tag }}.md" ${{ matrix.extra }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v2-${{ matrix.tag }}
+          path: bench/out/
+          retention-days: 7
