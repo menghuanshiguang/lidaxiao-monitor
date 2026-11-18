@@ -37,10 +37,9 @@ print("[2/4] 下载 720P 以内视频", flush=True)
 for old in os.listdir(OUT):
     if old.startswith("video."):
         os.remove(os.path.join(OUT, old))
-subprocess.run(
-    ["yt-dlp", "--no-warnings", "-f", "bv*[height<=720]+ba/b[height<=720]/b",
-     "-o", os.path.join(OUT, "video.%(ext)s"), URL],
-    check=True)
+run(["yt-dlp", "--no-warnings", *COOKIES,
+     "-f", "bv*[height<=720]+ba/b[height<=720]/b",
+     "-o", os.path.join(OUT, "video.%(ext)s"), URL])
 
 vids = [os.path.join(OUT, f) for f in os.listdir(OUT) if f.startswith("video.")]
 video = vids[0]
