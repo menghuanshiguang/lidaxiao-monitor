@@ -30,7 +30,7 @@ jobs:
       - name: Serve + run vision
         run: |
           "$LLAMA_DIR/llama-server" -m models/qwen25vl3b.gguf --mmproj models/mmproj.gguf \
-            -c 16384 -t 4 --jinja --host 127.0.0.1 --port 8080 --no-webui > server.log 2>&1 &
+            -c 16384 -t 4 --jinja --image-min-tokens 1024 --host 127.0.0.1 --port 8080 --no-webui > server.log 2>&1 &
           for i in $(seq 1 240); do
             if curl -sf http://127.0.0.1:8080/health > /dev/null; then echo "server up ${i}x2s"; break; fi
             sleep 2
