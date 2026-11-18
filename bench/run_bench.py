@@ -36,7 +36,13 @@ meta = json.load(open(os.path.join(fx, "meta.json"), encoding="utf-8"))
 # 历史报告: 取 docs/reports 里最新的 5 篇
 files = [f for f in sorted(glob.glob(os.path.join(ROOT, "docs", "reports", "*.md")))
          if not os.path.basename(f).startswith(("index", "latest", "weekly"))]
-history = "\n\n".join(open(f, encoding="utf-8").read() for f in files[-5:])[-6000:]
+_hist5 = "\n\n".join(open(f, encoding="utf-8").read() for f in files[-5:])[-6000:]
+if args.history_mode == "none":
+    history = ""
+elif args.history_mode == "trim":
+    history = "\n\n".join(open(f, encoding="utf-8").read() for f in files[-1:])[-1500:]
+else:
+    history = _hist5
 print(f"history: {len(history)} chars / {len(files[-5:])} 篇; subtitle: {len(subtitle)} chars", flush=True)
 
 import datetime  # noqa: E402
@@ -75,7 +81,11 @@ r = requests.post(args.base.rstrip("/") + "/chat/completions", json=payload, tim
 elapsed = time.time() - t0
 data = r.json()
 try:
-    text = data["choices"][0]["message"]["content"]
+    msg = (data.get("choices") or [{}])[0].get("message") or {}
+    text = msg.get("content") or ""
+    reason = msg.get("reasoning_content") or ""
+    if not text.strip():
+        text = f"[EMPTY CONTENT] reasoning_chars={len(reason)}\n" + reason[:1200]
 except Exception:
     text = f"[ERROR] HTTP {r.status_code}: {json.dumps(data, ensure_ascii=False)[:2000]}"
 usage = data.get("usage", {}) or {}
