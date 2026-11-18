@@ -188,7 +188,7 @@ def load_config(path=None):
             user = json.load(f)
         # 先深合并嵌套段再整体更新: cfg.update(user) 会把嵌套 dict 整体替换掉,
         # 导致后面的 cfg[k].update(user[k]) 变成 no-op, 用户配置缺省字段的默认值全部丢失
-        for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama",
+        for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama", "llm_local",
                   "vision_free", "vision", "vision_cli", "vision_fallback"):
             if isinstance(user.get(k), dict):
                 cfg[k].update(user.pop(k))
@@ -1336,6 +1336,9 @@ def _call_llm_once(pcfg, api_key, system, user):
     }
     # 先按普通模式放 temperature, 再由思考模式参数决定是否移除
     payload["temperature"] = pcfg.get("temperature", 0.3)
+    if pcfg.get("provider") in ("local", "llama") and pcfg.get("enable_thinking") is False:
+        # MiniCPM5 混合思考: 关掉, 否则容易把 token 全花在 reasoning 上、正文为空
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
     _apply_thinking(payload, pcfg)
     # Ollama: 透传 MoE/批处理/缓存参数, 等价于 llama-server 的对应 flag
     if pcfg.get("provider") == "ollama":
@@ -1575,6 +1578,35 @@ def _call_dsv(pcfg, token, prompt, images):
     return out
 
 
+REPORT_SECTIONS = ("【一句话摘要】", "【核心观点】", "【关键数据清单】",
+                   "【暗示提取】", "【市场定性】", "【操作含义】", "【观点连续性】")
+REPORT_TAIL = "以上为李大霄个人观点提炼"
+
+
+def validate_report(text):
+    """本地小模型结构校验: 7 段 + 结尾声明都要在, 否则视为不合格回退云端"""
+    t = (text or "").strip()
+    miss = [s for s in REPORT_SECTIONS if s not in t]
+    if len(t) < 400:
+        miss.append("内容过短")
+    if REPORT_TAIL not in t:
+        miss.append("缺结尾声明")
+    return (not miss), miss
+
+
+def _local_llm_alive(pcfg, timeout=3):
+    """本地 llama.cpp 探活: 没起就不进 provider 链, 免得每次白等 900s 超时"""
+    import requests
+    base = (pcfg.get("base_url") or "").rstrip("/")
+    if not base:
+        return False
+    health = (base[:-3] if base.endswith("/v1") else base) + "/health"
+    try:
+        return requests.get(health, timeout=timeout).status_code < 400
+    except Exception:
+        return False
+
+
 def call_llm(cfg, api_key, system, user, dsc_prompt=None):
     """按顺序尝试 LLM provider; 本地模式(cfg.local_ollama)只走 Ollama qwen2.5:7b
 
@@ -1585,6 +1617,9 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         providers = [cfg.get("llm_ollama")]
     else:
         providers = []
+        local = cfg.get("llm_local")
+        if local and local.get("enabled") and _local_llm_alive(local):
+            providers.append(local)            # 本地权重最前, 结构校验不过自动落云端
         free = cfg.get("llm_free")
         if free and free.get("enabled", True):
             providers.append(free)             # 免费层最前, 挂了自动落到下面三级
