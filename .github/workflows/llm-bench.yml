@@ -1,6 +1,7 @@
 name: LLM Bench (local GGUF)
 
-# 本地小模型评测: 同一份真实字幕 + 生产提示词, 比较输出质量与速度
+# 本地小模型评测: 真实字幕(bench/fixture, 本机 OCR 产出) + 生产提示词
+# 同一 prompt, 比较输出质量与 CPU 推理速度
 on:
   workflow_dispatch:
     inputs:
@@ -10,40 +11,7 @@ on:
         default: ''
 
 jobs:
-  fixture:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install deps
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          pip install --disable-pip-version-check -q yt-dlp rapidocr-onnxruntime requests
-      - name: Write Bilibili cookies
-        env:
-          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
-        run: |
-          mkdir -p data
-          if [ -n "$COOKIES_B64" ]; then
-            printf '%s' "$COOKIES_B64" | base64 -d > data/cookies.txt
-            echo "cookies: $(wc -c < data/cookies.txt) bytes"
-          else
-            echo "⚠️ BILIBILI_COOKIES_B64 未配置"
-          fi
-      - name: Build subtitle fixture
-        run: python bench/make_fixture.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: fixture
-          path: bench/fixture/
-          retention-days: 7
-
   bench:
-    needs: fixture
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -71,10 +39,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: fixture
-          path: bench/fixture/
       - name: Install python deps
         run: pip install --disable-pip-version-check -q requests
       - name: Get llama.cpp (cpu)
