@@ -1,0 +1,47 @@
+name: VLM Bench (片尾识别)
+
+# 用真实片尾帧 + 生产同款提示词, 测本地 VLM 能否代替 deepseek-flash 的视觉环节
+on:
+  workflow_dispatch:
+
+jobs:
+  vlm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q requests
+      - name: Get llama.cpp (cpu)
+        run: |
+          curl -sL -o lc.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-ubuntu-x64.tar.gz
+          tar xzf lc.tar.gz
+          DIR=$(dirname "$(find . -name llama-server -type f | head -1)")
+          echo "LLAMA_DIR=$PWD/$DIR" >> "$GITHUB_ENV"
+      - name: Download VLM
+        run: |
+          mkdir -p models
+          B=https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main
+          curl -L --retry 3 -# -o models/qwen25vl3b.gguf "$B/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf"
+          curl -L --retry 3 -# -o models/mmproj.gguf "$B/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
+          ls -lh models/
+      - name: Serve + run vision
+        run: |
+          "$LLAMA_DIR/llama-server" -m models/qwen25vl3b.gguf --mmproj models/mmproj.gguf \
+            -c 16384 -t 4 --jinja --host 127.0.0.1 --port 8080 --no-webui > server.log 2>&1 &
+          for i in $(seq 1 240); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null; then echo "server up ${i}x2s"; break; fi
+            sleep 2
+          done
+          python bench/run_vision.py http://127.0.0.1:8080/v1 bench/out/vision-qwen25vl3b.md
+          echo "--- server tail ---"; tail -15 server.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vlm-out
+          path: |
+            bench/out/
+            server.log
+          retention-days: 7
