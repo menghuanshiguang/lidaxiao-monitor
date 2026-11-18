@@ -23,6 +23,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
           pip install --disable-pip-version-check -q yt-dlp rapidocr-onnxruntime requests
+      - name: Write Bilibili cookies
+        env:
+          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
+        run: |
+          mkdir -p data
+          if [ -n "$COOKIES_B64" ]; then
+            printf '%s' "$COOKIES_B64" | base64 -d > data/cookies.txt
+            echo "cookies: $(wc -c < data/cookies.txt) bytes"
+          else
+            echo "⚠️ BILIBILI_COOKIES_B64 未配置"
+          fi
       - name: Build subtitle fixture
         run: python bench/make_fixture.py
       - uses: actions/upload-artifact@v4

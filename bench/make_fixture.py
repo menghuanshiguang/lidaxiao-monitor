@@ -14,10 +14,20 @@ FRAMES = os.path.join(OUT, "frames")
 os.makedirs(FRAMES, exist_ok=True)
 URL = f"https://www.bilibili.com/video/{BV}"
 
-print(f"[1/4] 取元信息 {BV}", flush=True)
-info = json.loads(subprocess.run(
-    ["yt-dlp", "-J", "--no-warnings", URL],
-    capture_output=True, text=True, check=True).stdout)
+COOKIES = ["--cookies", "data/cookies.txt"] if os.path.exists("data/cookies.txt") else []
+print(f"[1/4] 取元信息 {BV} (cookies={'yes' if COOKIES else 'no'})", flush=True)
+
+
+def run(args):
+    p = subprocess.run(args, capture_output=True, text=True)
+    if p.returncode != 0:
+        print("STDOUT:", p.stdout[-3000:], flush=True)
+        print("STDERR:", p.stderr[-3000:], flush=True)
+        raise SystemExit(f"命令失败: {' '.join(args[:4])} rc={p.returncode}")
+    return p
+
+
+info = json.loads(run(["yt-dlp", "-J", "--no-warnings", *COOKIES, URL]).stdout)
 title = info.get("title", "")
 ts = int(info.get("timestamp") or 0)
 dur = int(info.get("duration") or 0)
