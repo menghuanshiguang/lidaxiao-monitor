@@ -33,16 +33,24 @@ ts = int(info.get("timestamp") or 0)
 dur = int(info.get("duration") or 0)
 print(f"    {title} | {dur}s", flush=True)
 
-print("[2/4] 下载 720P 以内视频", flush=True)
-for old in os.listdir(OUT):
-    if old.startswith("video."):
-        os.remove(os.path.join(OUT, old))
-run(["yt-dlp", "--no-warnings", *COOKIES,
-     "-f", "bv*[height<=720]+ba/b[height<=720]/b",
-     "-o", os.path.join(OUT, "video.%(ext)s"), URL])
+print("[2/4] 用项目自带 bilidown 下载 480P (机房 IP 走 yt-dlp 会被 567)", flush=True)
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+BI = os.path.join(ROOT, "_repo", "bin", "bilidown.py")
+if not os.path.exists(BI):
+    run(["git", "clone", "--depth", "1",
+         "https://github.com/menghuanshiguang/bilibili-downloader-cli.git", "_repo"])
+dl_dir = os.path.join(OUT, "dl")
+os.makedirs(dl_dir, exist_ok=True)
+run([sys.executable, BI, "dl", BV, "video", dl_dir, "mp4", "480", "1"])
 
-vids = [os.path.join(OUT, f) for f in os.listdir(OUT) if f.startswith("video.")]
-video = vids[0]
+vids = []
+for r, _d, fs in os.walk(dl_dir):
+    for f in fs:
+        if f.lower().endswith((".mp4", ".flv", ".mkv")):
+            vids.append(os.path.join(r, f))
+if not vids:
+    raise SystemExit("bilidown 未产出视频文件")
+video = max(vids, key=os.path.getsize)
 print(f"    {video} {os.path.getsize(video)/1e6:.1f}MB", flush=True)
 
 print("[3/4] 抽帧(1fps, 底部字幕带)", flush=True)
