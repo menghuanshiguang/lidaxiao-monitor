@@ -13,6 +13,10 @@ import monitor as m  # noqa: E402
 
 cfg = m.load_config()
 cfg["llm_local"]["enabled"] = True
+# 测试环境用本脚本起的 llama.cpp(8080), 覆盖生产配置里的 Ollama 地址
+cfg["llm_local"]["base_url"] = os.environ.get("LOCAL_BASE_URL", "http://127.0.0.1:8080/v1")
+cfg["llm_local"]["model"] = "local"
+cfg["llm_local"]["enable_thinking"] = False
 for k in ("llm", "llm_cli", "llm_fallback", "llm_free"):
     cfg.pop(k, None)
 
