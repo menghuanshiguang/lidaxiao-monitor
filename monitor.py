@@ -1724,10 +1724,12 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
             # 任何 provider 返回超时/未获取回答都视为失败, 继续下一个兜底
             if "超时未获取回答" in out or "未获取回答" in out:
                 raise RuntimeError(f"{provider} 返回超时未获取回答")
-            if provider in ("local", "llama") and pcfg.get("validate", True):
-                ok, miss = validate_report(out, user)
+            if pcfg.get("validate", True):
+                ref = user if provider in ("local", "llama") else ""
+                ok, miss = validate_report(out, ref)
                 if not ok:
-                    log(f"⚠️ 本地模型未过结构校验({', '.join(miss)}), 回退云端")
+                    tag = "本地模型" if provider in ("local", "llama") else provider
+                    log(f"⚠️ {tag} 输出不完整({', '.join(miss)}), 换下一个通道")
                     last_err = f"{provider}: 校验未过 {miss}"
                     continue
             return out
@@ -2009,6 +2011,17 @@ def postprocess_analysis(analysis):
     # 2) 清洗引用编号: ")-4-10" -> ")" 以及行尾 "-4" / "- 6 - 8"
     analysis = re.sub(r"\)\s*-\s*\d+(?:\s*-\s*\d+)*", ")", analysis)
     analysis = re.sub(r"\s*-\s*\d+(?:\s*-\s*\d+)*\s*(?=[。\n]|$)", "", analysis)
+    # 3) 去掉模型自带的重复大标题, 并把 ##【…】 降回扁平样式(和早期报告一致)
+    out_lines = []
+    for ln in analysis.splitlines():
+        s = ln.rstrip()
+        if re.match(r"^#\s*(📺|李大霄视频分析)", s):
+            continue
+        s = re.sub(r"^#{2,4}\s*(【[^】]+】)", r"\1", s)
+        s = re.sub(r"^#{2,4}\s*(📽[^\n]*)", r"**\1**", s)
+        out_lines.append(s)
+    analysis = "\n".join(out_lines)
+    analysis = re.sub(r"\n{3,}", "\n\n", analysis)
     # 清理多余空白
     analysis = re.sub(r"[ \t]+", " ", analysis)
     return analysis.strip()
