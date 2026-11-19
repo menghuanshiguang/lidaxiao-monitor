@@ -222,15 +222,8 @@ def _check_c(o, hints=None):
         "direction": ad or "", "position": act.get("position", ""),
         "risk": act.get("risk", "")}
     o["continuity_kind"] = ck
-    # 业务一致性: 定性/操作不能和暗示方向相反
-    if mk == "反弹" and bear > bull:
-        errs.append(f"market_kind=反弹 但暗示里警示({bear})多于看多({bull})")
-    if mk == "防御" and bull > bear:
-        errs.append(f"market_kind=防御 但暗示里看多({bull})多于警示({bear})")
-    if ad == "看多" and bear > bull:
-        errs.append(f"action.direction=看多 但暗示以警示为主({bear} vs {bull})")
-    if ad == "看空" and bull > bear + 1:
-        errs.append(f"action.direction=看空 但暗示以看多为主({bull} vs {bear})")
+    # 注: 已取消"定性/操作 与暗示方向"的一致性校验
+    #     (视频整体可以偏多但引用的警示话术更多, 硬卡会误杀)
     return errs
 
 
