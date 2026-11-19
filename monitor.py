@@ -1636,14 +1636,33 @@ REPORT_SECTIONS = ("【一句话摘要】", "【核心观点】", "【关键数�
 REPORT_TAIL = "以上为李大霄个人观点提炼"
 
 
-def validate_report(text):
-    """本地小模型结构校验: 7 段 + 结尾声明都要在, 否则视为不合格回退云端"""
+def validate_report(text, reference=""):
+    """本地小模型结构校验: 7 段 + 结尾声明都要在, 否则视为不合格回退云端
+
+    reference 传入原始 prompt(含字幕), 用来抽查数字是否来自本期内容,
+    防止小模型把历史/别期的数据张冠李戴。
+    """
     t = (text or "").strip()
     miss = [s for s in REPORT_SECTIONS if s not in t]
     if len(t) < 400:
         miss.append("内容过短")
     if REPORT_TAIL not in t:
         miss.append("缺结尾声明")
+    # 复读提示词 / 模板占位没替换
+    for bad in ("每条必须包含原文数据", "格式: N.", "【输出模板】", "3-8条"):
+        if bad in t:
+            miss.append("复读提示词")
+            break
+    if re.search(r"(?m)^N\.\s", t):
+        miss.append("模板占位N未替换")
+    # 数字溯源: 输出里的多位数应当能在本期 prompt(字幕)里找到
+    if reference:
+        nums = [n for n in re.findall(r"\d+(?:\.\d+)?(?:%|万亿|亿|万)?", t)
+                if len(n.rstrip("%万亿亿点")) >= 2]
+        if nums:
+            hit = sum(1 for n in set(nums) if n in reference)
+            if hit / len(set(nums)) < 0.5:
+                miss.append(f"数据不在本期字幕({hit}/{len(set(nums))})")
     return (not miss), miss
 
 
@@ -1670,9 +1689,6 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         providers = [cfg.get("llm_ollama")]
     else:
         providers = []
-        local = cfg.get("llm_local")
-        if local and local.get("enabled") and _local_llm_alive(local):
-            providers.append(local)            # 本地权重最前, 结构校验不过自动落云端
         free = cfg.get("llm_free")
         if free and free.get("enabled", True):
             providers.append(free)             # 免费层最前, 挂了自动落到下面三级
@@ -1683,6 +1699,10 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         fallback = cfg.get("llm_fallback")
         if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(fallback)
+        # 本地权重放最后: 云端全挂时才兜底, 不占正常耗时(实测小模型质量还不够当主力)
+        local = cfg.get("llm_local")
+        if local and local.get("enabled") and _local_llm_alive(local):
+            providers.append(local)
     NO_KEY_PROVIDERS = {"ollama", "local", "llama"}
     last_err = ""
     for pcfg in providers:
@@ -1705,7 +1725,7 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
             if "超时未获取回答" in out or "未获取回答" in out:
                 raise RuntimeError(f"{provider} 返回超时未获取回答")
             if provider in ("local", "llama") and pcfg.get("validate", True):
-                ok, miss = validate_report(out)
+                ok, miss = validate_report(out, user)
                 if not ok:
                     log(f"⚠️ 本地模型未过结构校验({', '.join(miss)}), 回退云端")
                     last_err = f"{provider}: 校验未过 {miss}"
