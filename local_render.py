@@ -291,7 +291,14 @@ def render(a, b, c):
 
     out += ["", "【关键数据清单】"]
     mets = _as_list(a.get("metrics"))
-    out += [f"- {_strip_ts(m)}" for m in mets] or ["- 本期未提取到具体数据"]
+    def _fmt_metric(m):
+        if isinstance(m, dict):
+            v = _strip_ts(m.get("value") or m.get("数值") or "").strip()
+            c = str(m.get("context") or m.get("contexts") or m.get("说明") or "").strip()
+            s2 = f"{c}: {v}" if c and v else (v or c)
+            return _strip_ts(s2).rstrip(",，")
+        return _strip_ts(m).rstrip(",，")
+    out += [f"- {_fmt_metric(m)}" for m in mets] or ["- 本期未提取到具体数据"]
 
     out += ["", "【暗示提取】"]
     hints = _as_list(b.get("hints"))
