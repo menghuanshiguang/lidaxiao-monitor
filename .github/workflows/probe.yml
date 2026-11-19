@@ -1,0 +1,21 @@
+name: B站取流探测
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q requests
+      - name: Probe sources
+        run: |
+          for bv in BV1vusA6cENj BV1Jnsm6hEcQ; do
+            echo "########## $bv ##########"
+            python bench/probe_sources.py $bv || true
+          done
