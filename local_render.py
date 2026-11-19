@@ -145,6 +145,11 @@ def run(pcfg, user_text):
 
 
 # ---------------- 渲染 ----------------
+def _strip_ts(t):
+    """去掉模型顺手带上的字幕时间戳, 如 '00:44 100万亿元'"""
+    return re.sub(r"^\s*\d{1,2}:\d{2}(?::\d{2})?\s*", "", str(t or "")).strip()
+
+
 def render(o):
     def s(k, default=""):
         v = o.get(k)
@@ -155,7 +160,7 @@ def render(o):
     for i, p in enumerate(pts[:8], 1):
         if isinstance(p, dict):
             claim = str(p.get("claim", "")).strip()
-            data = str(p.get("data", "")).strip()
+            data = _strip_ts(p.get("data", ""))
             out.append(f"{i}. {claim}" + (f" (原文数据: {data})" if data else ""))
         else:
             out.append(f"{i}. {str(p).strip()}")
@@ -164,7 +169,7 @@ def render(o):
 
     out += ["", "【关键数据清单】"]
     mets = _as_list(o.get("metrics"))
-    out += [f"- {str(m).strip()}" for m in mets] or ["- 本期未提取到具体数据"]
+    out += [f"- {_strip_ts(m)}" for m in mets] or ["- 本期未提取到具体数据"]
 
     out += ["", "【暗示提取】"]
     hints = _as_list(o.get("hints"))
