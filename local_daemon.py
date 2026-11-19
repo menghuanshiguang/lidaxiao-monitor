@@ -264,6 +264,34 @@ def _push_url():
     return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
 
 
+_SEC_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$", re.M)
+
+
+def _digest_maps(text):
+    """抽 今日摘要/视频清单: 标题->摘要行, bvid->清单行"""
+    sums, lists = {}, {}
+    in_sum = in_list = False
+    for ln in text.splitlines():
+        if ln.startswith("## 今日摘要"):
+            in_sum, in_list = True, False
+            continue
+        if ln.startswith("## 视频清单"):
+            in_sum, in_list = False, True
+            continue
+        if _SEC_RE.match(ln):
+            in_sum = in_list = False
+            continue
+        if in_sum and ln.startswith("- 视频《"):
+            m = re.match(r"^- 视频《(.+?)》", ln)
+            if m:
+                sums[m.group(1).strip()] = ln
+        elif in_list and ln.startswith("- "):
+            m = re.search(r"\((BV\w+)\)", ln)
+            if m:
+                lists[m.group(1)] = ln
+    return sums, lists
+
+
 def _merge_report(new_text, old_text):
     """合并两份日报: 保留旧报告中不在新报告里的视频章节, 新报告的章节覆盖旧的同BV章节"""
     # 解析旧报告的视频章节 (按BV定位)
@@ -312,11 +340,26 @@ def _merge_report(new_text, old_text):
         if sec_re.match(ln):
             sec_start = i
             break
-    header = "\n".join(new_lines[:sec_start]).rstrip()
+    title_part = []
+    for ln in new_lines:
+        if ln.startswith("## 今日摘要") or _SEC_RE.match(ln):
+            break
+        title_part.append(ln)
     body = "\n\n".join(merged_secs)
     # 重新编号章节 (合并后序号可能重复)
     n_gen = (i for i in range(1, 100))
     body = re.sub(r"^## 视频\d+:", lambda m: f"## 视频{next(n_gen)}:", body, flags=re.M)
+    # 摘要/清单按合并后的章节顺序重建(旧报告里没被重跑的条目也保留)
+    old_sums, old_lists = _digest_maps(old_text)
+    new_sums, new_lists = _digest_maps(new_text)
+    sums = {**old_sums, **new_sums}
+    lists = {**old_lists, **new_lists}
+    order = _SEC_RE.findall(body)
+    sum_lines = [sums[t.strip()] for t, _b in order if t.strip() in sums]
+    list_lines = [lists[b] for _t, b in order if b in lists]
+    header = "\n".join(title_part).rstrip()
+    header += "\n\n## 今日摘要\n" + "\n".join(sum_lines)
+    header += "\n\n## 视频清单\n" + "\n".join(list_lines)
     return header + "\n\n" + body + "\n"
 
 
