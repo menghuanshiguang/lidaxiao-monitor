@@ -3,11 +3,18 @@ name: Local JSON bench
 # 测本地两步法(JSON 抽取 + 模板渲染)
 on:
   workflow_dispatch:
+    inputs:
+      repo:
+        description: 'GGUF 仓库'
+        default: 'openbmb/MiniCPM5-2B-GGUF'
+      file:
+        description: 'GGUF 文件名'
+        default: 'MiniCPM5-2B-Q4_K_M.gguf'
 
 jobs:
   t:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,11 +30,11 @@ jobs:
       - name: Download model
         run: |
           mkdir -p models
-          curl -L --retry 3 -# -o models/minicpm.gguf \
-            "https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/MiniCPM5-2B-Q4_K_M.gguf"
+          curl -L --retry 3 -# -o models/model.gguf \
+            "https://huggingface.co/${{ inputs.repo }}/resolve/main/${{ inputs.file }}"
       - name: Serve + run
         run: |
-          "$LLAMA_DIR/llama-server" -m models/minicpm.gguf -c 16384 -t 4 \
+          "$LLAMA_DIR/llama-server" -m models/model.gguf -c 16384 -t 4 \
             --jinja --host 127.0.0.1 --port 8080 --no-webui > server.log 2>&1 &
           for i in $(seq 1 180); do
             curl -sf http://127.0.0.1:8080/health >/dev/null && break; sleep 2
