@@ -1675,11 +1675,15 @@ def _local_llm_alive(pcfg, timeout=3):
     base = (pcfg.get("base_url") or "").rstrip("/")
     if not base:
         return False
-    health = (base[:-3] if base.endswith("/v1") else base) + "/health"
-    try:
-        return requests.get(health, timeout=timeout).status_code < 400
-    except Exception:
-        return False
+    root = base[:-3] if base.endswith("/v1") else base
+    # llama.cpp 有 /health; Ollama 只有 /v1/models 或 /api/tags
+    for url in (root + "/health", base.rstrip("/") + "/models", root + "/api/tags"):
+        try:
+            if requests.get(url, timeout=timeout).status_code < 400:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def call_llm(cfg, api_key, system, user, dsc_prompt=None):

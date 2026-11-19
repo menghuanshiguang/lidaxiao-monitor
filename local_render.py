@@ -108,7 +108,8 @@ def _post(pcfg, system, user, schema, max_tokens):
         "max_tokens": max_tokens,
         "stream": False,
     }
-    if pcfg.get("enable_thinking") is False:
+    # 只有 llama.cpp 认这个参数, Ollama 会当成未知字段
+    if pcfg.get("enable_thinking") is False and "11434" not in base:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
 
     # 首选 json_schema(枚举在解码阶段生效), 服务端不支持则退回 json_object
