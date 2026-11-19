@@ -21,12 +21,12 @@ CONTINUITY = ["延续", "升级", "新增", "反转", "首次记录"]
 SCHEMA_A = {
     "type": "object",
     "properties": {
-        "summary": {"type": "string", "minLength": 10},
+        "summary": {"type": "string", "minLength": 20},
         "points": {
             "type": "array", "minItems": 3, "maxItems": 8,
             "items": {
                 "type": "object",
-                "properties": {"claim": {"type": "string", "minLength": 4},
+                "properties": {"claim": {"type": "string", "minLength": 10},
                                "data": {"type": "string"}},
                 "required": ["claim", "data"],
             },
@@ -44,7 +44,7 @@ SCHEMA_B = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "quote": {"type": "string", "minLength": 4},
+                    "quote": {"type": "string", "minLength": 6},
                     "direction": {"type": "string", "enum": DIRECTIONS},
                     "reason": {"type": "string", "minLength": 4},
                 },
@@ -193,11 +193,17 @@ def _check_b(o):
     o["hints"] = good
     if len(good) < 3:
         errs.append(f"hints 只有 {len(good)} 条(需 3-8)")
+    dirs = {h["direction"] for h in good}
+    if len(good) >= 3 and len(dirs) < 2:
+        errs.append(f"方向过于单一(全为 {list(dirs)[0] if dirs else '?'})，必须区分看多/警示/中性")
     return errs
 
 
-def _check_c(o):
+def _check_c(o, hints=None):
     errs = []
+    hs = hints or []
+    bull = sum(1 for h in hs if "看多" in str(h.get("direction", "")))
+    bear = sum(1 for h in hs if any(k in str(h.get("direction", "")) for k in ("警示", "风险", "看空")))
     mk = _enum(o.get("market_kind"), MARKET_KINDS, MARKET_SYNONYMS)
     act = o.get("action") if isinstance(o.get("action"), dict) else {}
     ad = _enum(act.get("direction"), ACTIONS, ACTION_SYNONYMS)
@@ -215,6 +221,15 @@ def _check_c(o):
         "direction": ad or "", "position": act.get("position", ""),
         "risk": act.get("risk", "")}
     o["continuity_kind"] = ck
+    # 业务一致性: 定性/操作不能和暗示方向相反
+    if mk == "反弹" and bear > bull:
+        errs.append(f"market_kind=反弹 但暗示里警示({bear})多于看多({bull})")
+    if mk == "防御" and bull > bear:
+        errs.append(f"market_kind=防御 但暗示里看多({bull})多于警示({bear})")
+    if ad == "看多" and bear > bull:
+        errs.append(f"action.direction=看多 但暗示以警示为主({bear} vs {bull})")
+    if ad == "看空" and bull > bear + 1:
+        errs.append(f"action.direction=看空 但暗示以看多为主({bull} vs {bear})")
     return errs
 
 
@@ -257,7 +272,7 @@ def run(pcfg, user_text):
                         "hints": b.get("hints")}, ensure_ascii=False)[:4000]
     c = _run_stage(pcfg, C_SYSTEM,
                    f"【观点与暗示】\n{brief}\n\n【历史报告摘要】\n{hist or '(无历史报告)'}",
-                   SCHEMA_C, _check_c, 500, "3/3 定性+操作")
+                   SCHEMA_C, lambda o: _check_c(o, b.get("hints")), 500, "3/3 定性+操作")
     return render(a, b, c)
 
 
