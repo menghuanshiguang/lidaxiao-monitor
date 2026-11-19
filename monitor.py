@@ -2015,10 +2015,13 @@ def postprocess_analysis(analysis):
     out_lines = []
     for ln in analysis.splitlines():
         s = ln.rstrip()
-        if re.match(r"^#\s*(📺|李大霄视频分析)", s):
-            continue
-        s = re.sub(r"^#{2,4}\s*(【[^】]+】)", r"\1", s)
-        s = re.sub(r"^#{2,4}\s*(📽[^\n]*)", r"**\1**", s)
+        if re.match(r"^#+\s*视频\d+", s):
+            pass                                  # 章节标题保留
+        elif re.search(r"📽", s) and s.startswith("#"):
+            s = re.sub(r"^#+\s*", "", s)
+            s = f"**{s}**"                        # 片尾小标题加粗
+        elif s.startswith("#"):
+            continue                              # 模型自造的标题一律丢掉
         out_lines.append(s)
     analysis = "\n".join(out_lines)
     analysis = re.sub(r"\n{3,}", "\n\n", analysis)
