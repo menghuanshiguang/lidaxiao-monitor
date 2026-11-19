@@ -7,6 +7,7 @@
 """
 import json
 import re
+import time
 
 import requests
 
@@ -131,14 +132,24 @@ def run(pcfg, user_text):
     sub = _subtitle(user_text)
     hist = _history(user_text)
 
+    t0 = time.time()
+    print(f"[local] 1/3 抽取观点+数据 ...", flush=True)
     a = _post(pcfg, A_SYSTEM, f"【字幕文本】\n{sub}", 1000)
+    print(f"[local] 1/3 完成 {time.time()-t0:.0f}s | 观点 {len(a.get('points') or [])} 条", flush=True)
+
+    t1 = time.time()
+    print(f"[local] 2/3 判断暗示话术 ...", flush=True)
     b = _post(pcfg, "你是财经话术分析器。\n" + B_SYSTEM,
               f"【字幕文本】\n{sub}", 800)
+    print(f"[local] 2/3 完成 {time.time()-t1:.0f}s | 暗示 {len(b.get('hints') or [])} 条", flush=True)
 
     brief = json.dumps({"summary": a.get("summary"), "points": a.get("points"),
                         "hints": b.get("hints")}, ensure_ascii=False)[:4000]
     c_user = f"【观点与暗示】\n{brief}\n\n【历史报告摘要】\n{hist or '(无历史报告)'}"
+    t2 = time.time()
+    print(f"[local] 3/3 定性+操作 ...", flush=True)
     c = _post(pcfg, C_SYSTEM, c_user, 500)
+    print(f"[local] 3/3 完成 {time.time()-t2:.0f}s | 总 {time.time()-t0:.0f}s", flush=True)
     c = _fix_c(c, b.get("hints"))
 
     return render({**a, **b, **c})
