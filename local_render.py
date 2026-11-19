@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""本地小模型分段法: 抽取分成 3 次调用, 每次只产出小 JSON, 由代码渲染成报告
+"""本地小模型分段法 + 枚举约束
 
-① 观点 + 数据清单   ② 暗示提取(带判断口径示例)   ③ 市场定性 + 操作含义 + 连续性
-好处: 每次任务小、约束强, 2B 模型也能稳定完成; 格式由 render() 保证。
+思路: 字段边界交给 schema(json_schema/enum) 和解码器, 而不是指望模型自觉。
+① 观点+数据   ② 暗示(方向枚举)   ③ 定性(枚举) + 操作(方向枚举)
+每段都带 enum + 数量约束, 解不出来就重试一次, 再不行抛错回落云端。
 """
 import json
 import re
@@ -11,43 +12,93 @@ import time
 
 import requests
 
-# ---------------- ① 观点 + 数据 ----------------
-A_SYSTEM = """你是财经视频信息抽取器。只依据用户给的【字幕文本】抽取，输出一个 JSON（不要解释、不要代码块）：
-{"summary": "一句话结论", "points": [{"claim": "观点", "data": "原文数据"}], "metrics": ["数据项: 数值"]}
-规则：
-- points 3-8 条；data 必须是字幕里真实出现的数字/日期原话，禁止用字幕时间戳(如 00:44)冒充；
-- metrics 只列具体数值类信息，没有就给空数组；
-- 不要评价，不要给操作建议。"""
+# ---------------- JSON Schema(带枚举边界) ----------------
+DIRECTIONS = ["🔴警示", "🟢看多", "⚪中性", "⚠️风险"]
+MARKET_KINDS = ["反弹", "反转", "见顶", "调整", "防御"]
+ACTIONS = ["看多", "看空", "观望"]
+CONTINUITY = ["延续", "升级", "新增", "反转", "首次记录"]
 
-# ---------------- ② 暗示提取 ----------------
-FEWSHOT = """判断口径示例（只学口径，不要照抄内容）：
-1. “XX跌了5%，不是推荐” → 🔴警示｜报跌幅型，属风险提示，绝不是低吸信号
-2. “港股通没有杠杆” → 🟢看多｜光杆点名型，隐性认可
-3. 片尾“市场有巨大风险，投资需谨慎” → ⚪中性｜合规免责声明
-4. “没量，那还是反弹，不一定是反转” → 🔴警示｜量能框架下的否定判断"""
+SCHEMA_A = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string", "minLength": 10},
+        "points": {
+            "type": "array", "minItems": 3, "maxItems": 8,
+            "items": {
+                "type": "object",
+                "properties": {"claim": {"type": "string", "minLength": 4},
+                               "data": {"type": "string"}},
+                "required": ["claim", "data"],
+            },
+        },
+        "metrics": {"type": "array", "maxItems": 8, "items": {"type": "string"}},
+    },
+    "required": ["summary", "points", "metrics"],
+}
 
-B_SYSTEM = f"""你是财经话术分析器。只分析【字幕文本】里带暗示性的话术，输出一个 JSON（不要解释）：
-{{"hints": [{{"quote": "原话片段", "direction": "🔴警示 或 🟢看多 或 ⚪中性 或 ⚠️风险", "reason": "判断依据"}}]}}
-规则：
-- 3-8 条，quote 必须是字幕原话；
-- 必须结合语境，不要一律标看多；纯陈述政策/数据、无方向含义的标 ⚪中性；
-{FEWSHOT}"""
+SCHEMA_B = {
+    "type": "object",
+    "properties": {
+        "hints": {
+            "type": "array", "minItems": 3, "maxItems": 8,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quote": {"type": "string", "minLength": 4},
+                    "direction": {"type": "string", "enum": DIRECTIONS},
+                    "reason": {"type": "string", "minLength": 4},
+                },
+                "required": ["quote", "direction", "reason"],
+            },
+        }
+    },
+    "required": ["hints"],
+}
 
-# ---------------- ③ 定性 + 操作 ----------------
-C_SYSTEM = """你是投资研究报告定稿器。只依据用户给的观点与暗示条目，输出一个 JSON（不要解释、不要代码块）：
-{"market": "市场定性", "action": {"direction": "操作方向", "position": "仓位建议", "risk": "风险点"}, "continuity": "观点连续性"}
+SCHEMA_C = {
+    "type": "object",
+    "properties": {
+        "market_kind": {"type": "string", "enum": MARKET_KINDS},
+        "market_basis": {"type": "string", "minLength": 6},
+        "action": {
+            "type": "object",
+            "properties": {
+                "direction": {"type": "string", "enum": ACTIONS},
+                "position": {"type": "string", "minLength": 4},
+                "risk": {"type": "string", "minLength": 4},
+            },
+            "required": ["direction", "position", "risk"],
+        },
+        "continuity_kind": {"type": "string", "enum": CONTINUITY},
+        "continuity_note": {"type": "string"},
+    },
+    "required": ["market_kind", "market_basis", "action", "continuity_kind"],
+}
 
-填写要求：
-- market 从 反弹/反转/见顶/调整/防御 里选一个，后接一句依据；
-- direction 从 看多/看空/观望 里选一个；
-- position、risk 各写一句本期具体内容；
-- continuity 写 延续/升级/新增/反转 并说明，没有历史就写「首次记录,无历史对比」。
+# ---------------- 提示词(只讲怎么想, 边界交给 schema) ----------------
+A_SYSTEM = """只依据用户给的【字幕文本】抽取信息，输出 JSON。
+summary 一句话结论；points 3-8 条，每条 claim 是观点、data 是字幕里真实出现的数字/日期原话（不要用时间戳）；metrics 只放具体数值。
+不要评价，不要建议。"""
 
-格式示例（只示范怎么填，内容要换成当期的）：
-{"market":"防御：政策面偏暖，但反复提示外部联动与量能不足","action":{"direction":"观望","position":"维持中性仓位，不加杠杆","risk":"外部市场传导、情绪过热与杠杆资金"},"continuity":"首次记录,无历史对比"}"""
+B_SYSTEM = """判断【字幕文本】里带暗示性的话术，输出 JSON。
+每条给 quote(字幕原话)、direction、reason(依据)。
+direction 只能取这四个之一：🔴警示 / 🟢看多 / ⚪中性 / ⚠️风险。
+判断口径：
+- 光杆点名某标的、无跌幅铺垫 → 🟢看多（隐性推荐）
+- “XX跌了X%，不是推荐”这类报跌幅 → 🔴警示（风险提示，不是低吸）
+- 片尾免责声明 → ⚪中性
+- 明确提醒某个风险点（杠杆、情绪、外部传导）→ ⚠️风险
+不要一律标看多；纯陈述政策/数据的标 ⚪中性。"""
+
+C_SYSTEM = """根据用户给的观点与暗示条目做定稿，输出 JSON。
+market_kind 只能取：反弹 / 反转 / 见顶 / 调整 / 防御，market_basis 写一句依据。
+action.direction 只能取：看多 / 看空 / 观望。
+continuity_kind 只能取：延续 / 升级 / 新增 / 反转 / 首次记录。
+position、risk、continuity_note 各写一句本期具体内容，不要写说明文字。"""
 
 
-def _post(pcfg, system, user, max_tokens):
+# ---------------- 请求 ----------------
+def _post(pcfg, system, user, schema, max_tokens):
     base = (pcfg.get("base_url") or "").rstrip("/")
     payload = {
         "model": pcfg.get("model", "local"),
@@ -55,19 +106,25 @@ def _post(pcfg, system, user, max_tokens):
                      {"role": "user", "content": user[:12000]}],
         "temperature": pcfg.get("temperature", 0.2),
         "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
         "stream": False,
     }
     if pcfg.get("enable_thinking") is False:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
-    r = requests.post(base + "/chat/completions", json=payload,
-                      timeout=pcfg.get("timeout", 900))
-    r.raise_for_status()
-    msg = (r.json().get("choices") or [{}])[0].get("message") or {}
-    content = (msg.get("content") or "").strip()
-    if not content:
-        raise RuntimeError("分段调用返回空 content")
-    return _parse(content)
+
+    # 首选 json_schema(枚举在解码阶段生效), 服务端不支持则退回 json_object
+    for fmt in ({"type": "json_schema",
+                 "json_schema": {"name": "out", "strict": True, "schema": schema}},
+                {"type": "json_object"}):
+        payload["response_format"] = fmt
+        r = requests.post(base + "/chat/completions", json=payload,
+                          timeout=pcfg.get("timeout", 900))
+        if r.status_code < 400:
+            msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+            content = (msg.get("content") or "").strip()
+            if content:
+                return _parse(content)
+            raise RuntimeError("本地返回空 content")
+    raise RuntimeError(f"本地请求失败 HTTP {r.status_code}")
 
 
 def _clean_json(text):
@@ -83,10 +140,101 @@ def _parse(text):
     return json.loads(_clean_json(text))
 
 
-def _as_list(v):
-    if isinstance(v, list):
-        return v
-    return [v] if v else []
+# ---------------- 枚举校验(解码没兜住时在这一层兜) ----------------
+DIR_SYNONYMS = {
+    "🔴": "🔴警示", "警示": "🔴警示", "看空": "🔴警示", "空": "🔴警示",
+    "🟢": "🟢看多", "看多": "🟢看多", "多": "🟢看多",
+    "⚪": "⚪中性", "中性": "⚪中性",
+    "⚠️": "⚠️风险", "风险": "⚠️风险", "⚠": "⚠️风险",
+}
+MARKET_SYNONYMS = {
+    "反弹": "反弹", "反转": "反转", "见顶": "见顶", "调整": "调整", "防御": "防御",
+    "上涨": "反弹", "下跌": "调整", "高位": "见顶", "底部": "反弹", "观望": "防御",
+}
+ACTION_SYNONYMS = {"看多": "看多", "多": "看多", "买入": "看多",
+                   "看空": "看空", "空": "看空", "卖出": "看空",
+                   "观望": "观望", "中性": "观望", "持有": "观望"}
+CONT_SYNONYMS = {k: k for k in CONTINUITY} | {"无历史": "首次记录", "首次": "首次记录"}
+
+
+def _enum(v, allowed, table):
+    s = str(v or "").strip()
+    if s in allowed:
+        return s
+    return table.get(s) or next((a for a in allowed if a in s), None)
+
+
+def _check_a(o):
+    errs = []
+    pts = [p for p in (o.get("points") or []) if isinstance(p, dict)
+           and str(p.get("claim", "")).strip()]
+    o["points"] = pts
+    if len(pts) < 3:
+        errs.append(f"points 只有 {len(pts)} 条(需 3-8)")
+    if not str(o.get("summary", "")).strip():
+        errs.append("summary 为空")
+    return errs
+
+
+def _check_b(o):
+    errs, good = [], []
+    for h in (o.get("hints") or []):
+        if not isinstance(h, dict):
+            continue
+        q = str(h.get("quote", "")).strip()
+        d = _enum(h.get("direction"), DIRECTIONS, DIR_SYNONYMS)
+        r = str(h.get("reason", "")).strip()
+        if not q:
+            continue
+        if not d:
+            errs.append(f"direction 非法: {h.get('direction')!r}")
+            continue
+        good.append({"quote": q, "direction": d, "reason": r or "见原文语境"})
+    o["hints"] = good
+    if len(good) < 3:
+        errs.append(f"hints 只有 {len(good)} 条(需 3-8)")
+    return errs
+
+
+def _check_c(o):
+    errs = []
+    mk = _enum(o.get("market_kind"), MARKET_KINDS, MARKET_SYNONYMS)
+    act = o.get("action") if isinstance(o.get("action"), dict) else {}
+    ad = _enum(act.get("direction"), ACTIONS, ACTION_SYNONYMS)
+    ck = _enum(o.get("continuity_kind"), CONTINUITY, CONT_SYNONYMS) or "首次记录"
+    if not mk:
+        errs.append(f"market_kind 非法: {o.get('market_kind')!r}")
+    if not ad:
+        errs.append(f"action.direction 非法: {act.get('direction')!r}")
+    for k in ("position", "risk"):
+        if not str(act.get(k, "")).strip():
+            errs.append(f"action.{k} 为空")
+    if not str(o.get("market_basis", "")).strip():
+        errs.append("market_basis 为空")
+    o["market_kind"], o["action"] = mk or "", {
+        "direction": ad or "", "position": act.get("position", ""),
+        "risk": act.get("risk", "")}
+    o["continuity_kind"] = ck
+    return errs
+
+
+def _run_stage(pcfg, system, user, schema, checker, max_tokens, label):
+    """跑一段: 校验不过就把错误喂回去重试一次"""
+    t0 = time.time()
+    print(f"[local] {label} ...", flush=True)
+    o = _post(pcfg, system, user, schema, max_tokens)
+    errs = checker(o)
+    if errs:
+        print(f"[local] {label} 不合格({'; '.join(errs)}), 重试", flush=True)
+        o2 = _post(pcfg, system,
+                   user + f"\n\n上一次输出不合格：{'; '.join(errs)}。请严格按枚举取值重出。",
+                   schema, max_tokens)
+        errs2 = checker(o2)
+        if errs2:
+            raise RuntimeError(f"{label} 两次都不合格: {errs2}")
+        o = o2
+    print(f"[local] {label} 完成 {time.time()-t0:.0f}s", flush=True)
+    return o
 
 
 def _subtitle(user_text):
@@ -99,110 +247,62 @@ def _history(user_text):
     return (m.group(1).strip() if m else "")[:1500]
 
 
-PLACEHOLDER = ("选一个", "一句话", "说明；", "反弹/反转", "市场定性", "操作方向", "仓位建议", "风险点")
-
-
-def _bad(v):
-    v = str(v or "")
-    return (not v.strip()) or any(m in v for m in PLACEHOLDER)
-
-
-def _fix_c(c, hints):
-    """第三段被模型照抄占位时, 用暗示方向分布兜底"""
-    hs = [h for h in (hints or []) if isinstance(h, dict)]
-    bull = sum(1 for h in hs if "看多" in str(h.get("direction", "")))
-    bear = sum(1 for h in hs if any(k in str(h.get("direction", "")) for k in ("警示", "风险", "看空")))
-    act = c.get("action") if isinstance(c.get("action"), dict) else {}
-    if _bad(c.get("market")):
-        c["market"] = ("防御：警示类条目多于看多项，整体偏谨慎" if bear > bull
-                       else "反弹：看多类条目偏多，但仍需量能确认")
-    if _bad(act.get("direction")):
-        act["direction"] = "观望" if bear >= bull else "看多"
-    if _bad(act.get("position")):
-        act["position"] = "维持中性仓位，不加杠杆"
-    if _bad(act.get("risk")):
-        act["risk"] = "外部市场传导、情绪过热与杠杆风险"
-    if _bad(c.get("continuity")):
-        c["continuity"] = "首次记录,无历史对比"
-    c["action"] = act
-    return c
-
-
 def run(pcfg, user_text):
-    sub = _subtitle(user_text)
-    hist = _history(user_text)
+    sub, hist = _subtitle(user_text), _history(user_text)
 
-    t0 = time.time()
-    print(f"[local] 1/3 抽取观点+数据 ...", flush=True)
-    a = _post(pcfg, A_SYSTEM, f"【字幕文本】\n{sub}", 1000)
-    print(f"[local] 1/3 完成 {time.time()-t0:.0f}s | 观点 {len(a.get('points') or [])} 条", flush=True)
-
-    t1 = time.time()
-    print(f"[local] 2/3 判断暗示话术 ...", flush=True)
-    b = _post(pcfg, "你是财经话术分析器。\n" + B_SYSTEM,
-              f"【字幕文本】\n{sub}", 800)
-    print(f"[local] 2/3 完成 {time.time()-t1:.0f}s | 暗示 {len(b.get('hints') or [])} 条", flush=True)
+    a = _run_stage(pcfg, A_SYSTEM, f"【字幕文本】\n{sub}", SCHEMA_A, _check_a, 1000, "1/3 观点+数据")
+    b = _run_stage(pcfg, B_SYSTEM, f"【字幕文本】\n{sub}", SCHEMA_B, _check_b, 800, "2/3 暗示")
 
     brief = json.dumps({"summary": a.get("summary"), "points": a.get("points"),
                         "hints": b.get("hints")}, ensure_ascii=False)[:4000]
-    c_user = f"【观点与暗示】\n{brief}\n\n【历史报告摘要】\n{hist or '(无历史报告)'}"
-    t2 = time.time()
-    print(f"[local] 3/3 定性+操作 ...", flush=True)
-    c = _post(pcfg, C_SYSTEM, c_user, 500)
-    print(f"[local] 3/3 完成 {time.time()-t2:.0f}s | 总 {time.time()-t0:.0f}s", flush=True)
-    c = _fix_c(c, b.get("hints"))
-
-    return render({**a, **b, **c})
+    c = _run_stage(pcfg, C_SYSTEM,
+                   f"【观点与暗示】\n{brief}\n\n【历史报告摘要】\n{hist or '(无历史报告)'}",
+                   SCHEMA_C, _check_c, 500, "3/3 定性+操作")
+    return render(a, b, c)
 
 
 # ---------------- 渲染 ----------------
 def _strip_ts(t):
-    """去掉模型顺手带上的字幕时间戳, 如 '00:44 100万亿元'"""
     return re.sub(r"^\s*\d{1,2}:\d{2}(?::\d{2})?\s*", "", str(t or "")).strip()
 
 
-def render(o):
-    def s(k, default=""):
-        v = o.get(k)
-        return str(v).strip() if v is not None else default
+def _as_list(v):
+    return v if isinstance(v, list) else ([v] if v else [])
 
-    out = [f"【一句话摘要】{s('summary') or '（未给出摘要）'}", "", "【核心观点】"]
-    pts = _as_list(o.get("points"))
+
+def render(a, b, c):
+    out = [f"【一句话摘要】{str(a.get('summary', '')).strip()}", "", "【核心观点】"]
+    pts = _as_list(a.get("points"))
     for i, p in enumerate(pts[:8], 1):
-        if isinstance(p, dict):
-            claim = str(p.get("claim", "")).strip()
-            data = _strip_ts(p.get("data", ""))
-            out.append(f"{i}. {claim}" + (f" (原文数据: {data})" if data else ""))
-        else:
-            out.append(f"{i}. {str(p).strip()}")
+        claim = str(p.get("claim", "")).strip()
+        data = _strip_ts(p.get("data", ""))
+        out.append(f"{i}. {claim}" + (f" (原文数据: {data})" if data else ""))
     if not pts:
         out.append("1. （未提取到观点）")
 
     out += ["", "【关键数据清单】"]
-    mets = _as_list(o.get("metrics"))
+    mets = _as_list(a.get("metrics"))
     out += [f"- {_strip_ts(m)}" for m in mets] or ["- 本期未提取到具体数据"]
 
     out += ["", "【暗示提取】"]
-    hints = _as_list(o.get("hints"))
+    hints = _as_list(b.get("hints"))
     for i, h in enumerate(hints[:10], 1):
-        if isinstance(h, dict):
-            q = str(h.get("quote", "")).strip()
-            d = str(h.get("direction", "⚪中性")).strip() or "⚪中性"
-            r = str(h.get("reason", "")).strip()
-            out.append(f"{i}. “{q}” → {d}" + (f"：{r}" if r else ""))
-        else:
-            out.append(f"{i}. {str(h).strip()}")
+        out.append(f"{i}. “{h['quote']}” → {h['direction']}：{h.get('reason', '')}")
     if not hints:
         out.append("1. 本期无明显暗示性话术")
 
-    out += ["", f"【市场定性】{s('market') or '未给出'}"]
+    kind = c.get("market_kind") or "调整"
+    basis = str(c.get("market_basis", "")).strip()
+    out += ["", f"【市场定性】**{kind}**" + (f"：{basis}" if basis else "")]
 
-    act = o.get("action") if isinstance(o.get("action"), dict) else {}
+    act = c.get("action") or {}
     out += ["", "【操作含义】",
-            f"- **方向**: {str(act.get('direction', '观望')).strip() or '观望'}",
-            f"- **仓位**: {str(act.get('position', '维持现状')).strip() or '维持现状'}",
-            f"- **风险**: {str(act.get('risk', '见上述风险提示')).strip() or '见上述风险提示'}"]
+            f"- **方向**: {act.get('direction') or '观望'}",
+            f"- **仓位**: {str(act.get('position', '')).strip() or '维持现状'}",
+            f"- **风险**: {str(act.get('risk', '')).strip() or '见上述风险提示'}"]
 
-    out += ["", f"【观点连续性】{s('continuity') or '首次记录,无历史对比'}", "",
+    ck = c.get("continuity_kind") or "首次记录"
+    note = str(c.get("continuity_note", "")).strip()
+    out += ["", f"【观点连续性】**{ck}**" + (f"：{note}" if note else ""), "",
             "以上为李大霄个人观点提炼,不构成投资建议"]
     return "\n".join(out)
