@@ -18,4 +18,6 @@ jobs:
           for bv in BV1vusA6cENj BV1Jnsm6hEcQ; do
             echo "########## $bv ##########"
             python bench/probe_sources.py $bv || true
+          echo "########## 请求方式对比 ##########"
+          python bench/probe_methods.py BV1vusA6cENj || true
           done
