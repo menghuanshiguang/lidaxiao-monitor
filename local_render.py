@@ -24,7 +24,17 @@ EXTRACT_SYSTEM = """你是财经视频内容抽取器。只依据用户给出的
 要求：
 - points 3-8 条，每条尽量带原文数据；
 - hints 逐条列出带暗示的话术，注意"不是推荐"要结合语境判断：光杆点名多为隐性推荐，报跌幅型是风险提示，片尾免责声明算中性；
-- 只写字幕里真实出现的数据，绝不虚构。"""
+- 只写字幕里真实出现的数据，绝不虚构；
+- 下面每条字段都必须填本期具体内容，禁止把说明文字（如"之一""仓位建议""风险点"）原样抄进结果。
+
+格式示例（内容仅为示范，实际要按本期字幕填写）：
+{"summary":"本期围绕政策定调，强调长期资金入市",
+ "points":[{"claim":"长钱入市已成体系","data":"净买入超1.5万亿元"}],
+ "metrics":["A股总市值: 突破100万亿元"],
+ "hints":[{"quote":"不是推荐","direction":"⚪中性","reason":"片尾合规声明，非行情暗示"}],
+ "market":"防御：有政策利好但反复提示外部联动风险",
+ "action":{"direction":"观望","position":"维持中性仓位，不加杠杆","risk":"外部市场传导与情绪过热"},
+ "continuity":"延续：与昨日报告一致，仍以防御为主"}"""
 
 
 def _clean_json(text):
@@ -93,6 +103,37 @@ def render(o):
     return "\n".join(out)
 
 
+
+PLACEHOLDER_MARKERS = ("之一", "仓位建议", "风险点", "看多/看空", "或", "具体内容")
+
+
+def _is_placeholder(o):
+    act = o.get("action") if isinstance(o.get("action"), dict) else {}
+    vals = [str(o.get("market", "")), str(act.get("direction", "")),
+            str(act.get("position", "")), str(act.get("risk", ""))]
+    return any(v.strip() in ("", "仓位建议", "风险点", "看多/看空/观望")
+               or "之一" in v or "看多/看空" in v for v in vals)
+
+
+def _heuristic_fill(o):
+    """模型照抄占位时, 用暗示条目的方向分布兜底补齐"""
+    hints = [h for h in (o.get("hints") or []) if isinstance(h, dict)]
+    bull = sum(1 for h in hints if "看多" in str(h.get("direction", "")))
+    bear = sum(1 for h in hints if any(k in str(h.get("direction", "")) for k in ("警示", "风险", "看空")))
+    act = o.get("action") if isinstance(o.get("action"), dict) else {}
+    if "之一" in str(o.get("market", "")) or not str(o.get("market", "")).strip():
+        o["market"] = ("防御：警示条目多于看多项，整体偏谨慎" if bear >= bull
+                       else "反弹：看多条目占优，但仍需量能确认")
+    if "看多/看空" in str(act.get("direction", "")) or not act.get("direction"):
+        act["direction"] = "观望" if bear >= bull else "看多"
+    if not act.get("position") or act.get("position") in ("仓位建议",):
+        act["position"] = "维持中性仓位，不加杠杆"
+    if not act.get("risk") or act.get("risk") in ("风险点",):
+        act["risk"] = "外部市场传导、情绪过热与杠杆风险"
+    o["action"] = act
+    return o
+
+
 def run(pcfg, user_text):
     """调本地 llama-server 做 JSON 抽取并渲染成报告"""
     base = (pcfg.get("base_url") or "").rstrip("/")
@@ -116,4 +157,7 @@ def run(pcfg, user_text):
     content = (msg.get("content") or "").strip()
     if not content:
         raise RuntimeError("本地 JSON 抽取返回空 content")
-    return render(_parse(content))
+    o = _parse(content)
+    if _is_placeholder(o):
+        o = _heuristic_fill(o)
+    return render(o)
