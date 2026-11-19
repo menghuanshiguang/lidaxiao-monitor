@@ -1,0 +1,35 @@
+name: Local JSON bench
+
+# 测本地两步法(JSON 抽取 + 模板渲染)
+on:
+  workflow_dispatch:
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q requests
+      - name: Get llama.cpp
+        run: |
+          curl -sL -o lc.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-ubuntu-x64.tar.gz
+          tar xzf lc.tar.gz
+          DIR=$(dirname "$(find . -name llama-server -type f | head -1)")
+          echo "LLAMA_DIR=$PWD/$DIR" >> "$GITHUB_ENV"
+      - name: Download model
+        run: |
+          mkdir -p models
+          curl -L --retry 3 -# -o models/minicpm.gguf \
+            "https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/MiniCPM5-2B-Q4_K_M.gguf"
+      - name: Serve + run
+        run: |
+          "$LLAMA_DIR/llama-server" -m models/minicpm.gguf -c 16384 -t 4 \
+            --jinja --host 127.0.0.1 --port 8080 --no-webui > server.log 2>&1 &
+          for i in $(seq 1 180); do
+            curl -sf http://127.0.0.1:8080/health >/dev/null && break; sleep 2
+          done
+          python bench/json_test.py

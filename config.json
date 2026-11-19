@@ -39,11 +39,12 @@
     "base_url": "http://127.0.0.1:8080/v1",
     "model": "minicpm5-2b",
     "temperature": 0.3,
-    "max_tokens": 3000,
+    "max_tokens": 1600,
     "timeout": 900,
     "enable_thinking": false,
     "validate": true,
-    "position": "first"
+    "position": "first",
+    "mode": "json"
   },
   "llm_fallback": {
     "provider": "deepseek",
