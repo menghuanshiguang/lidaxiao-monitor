@@ -1,0 +1,34 @@
+name: Ollama Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'ollama 模型名'
+        default: 'rinibr20/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF'
+
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q requests
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+      - name: Pull + serve
+        env:
+          OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+        run: |
+          (ollama serve > ollama.log 2>&1 &)
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+          ollama pull "${{ inputs.model }}"
+          ollama list
+      - name: Run bench
+        env:
+          OLLAMA_MODELS: ${{ github.workspace }}/.ollama-models
+        run: python bench/json_test.py
