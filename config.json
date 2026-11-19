@@ -37,7 +37,7 @@
     "enabled": true,
     "provider": "local",
     "base_url": "http://127.0.0.1:8080/v1",
-    "model": "minicpm5-2b",
+    "model": "qwen3.5-9b-heretic",
     "temperature": 0.3,
     "max_tokens": 1600,
     "timeout": 900,

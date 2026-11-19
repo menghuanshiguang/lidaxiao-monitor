@@ -1,13 +1,13 @@
-# 启动本地 MiniCPM5-2B (llama.cpp), 供同一 step 内的 python 调用
+# 启动本地 Qwen3.5-9B (llama.cpp), 供同一 step 内的 python 调用
 # 注意: GitHub Actions 在 step 结束时会杀掉子进程, 所以必须和调用方在同一个 step
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 New-Item -ItemType Directory -Force models | Out-Null
 
-if (-not (Test-Path "models\MiniCPM5-2B-Q4_K_M.gguf")) {
-  Write-Host "下载 MiniCPM5-2B Q4_K_M (~1.1GB)..."
-  Invoke-WebRequest -Uri "https://huggingface.co/openbmb/MiniCPM5-2B-GGUF/resolve/main/MiniCPM5-2B-Q4_K_M.gguf" -OutFile "models\MiniCPM5-2B-Q4_K_M.gguf" -UseBasicParsing
+if (-not (Test-Path "models\qwen35-9b-q4.gguf")) {
+  Write-Host "下载 Qwen3.5-9B Q4_K_M (~5.5GB)..."
+  Invoke-WebRequest -Uri "https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF/resolve/main/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic.Q4_K_M.gguf" -OutFile "models\qwen35-9b-q4.gguf" -UseBasicParsing
 }
 
 if (-not (Test-Path "llama\llama-server.exe")) {
@@ -19,7 +19,7 @@ if (-not (Test-Path "llama\llama-server.exe")) {
 $exe = Get-ChildItem -Path llama -Recurse -Filter llama-server.exe | Select-Object -First 1
 if (-not $exe) { throw "llama-server.exe 未找到" }
 
-$modelPath = (Resolve-Path "models\MiniCPM5-2B-Q4_K_M.gguf").Path
+$modelPath = (Resolve-Path "models\qwen35-9b-q4.gguf").Path
 $logOut = Join-Path (Get-Location) "llama-server.log"
 $logErr = Join-Path (Get-Location) "llama-server.err.log"
 

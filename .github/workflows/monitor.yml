@@ -26,7 +26,7 @@ permissions:
 jobs:
   monitor:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,7 +135,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models/
-          key: local-llm-minicpm5-2b-q4
+          key: local-llm-qwen35-9b-q4
 
       - name: Run unified monitor (local/cloud adaptive)
         if: ${{ github.event.inputs.smoke != 'true' }}
