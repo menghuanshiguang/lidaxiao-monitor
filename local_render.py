@@ -33,11 +33,17 @@ B_SYSTEM = f"""你是财经话术分析器。只分析【字幕文本】里带�
 {FEWSHOT}"""
 
 # ---------------- ③ 定性 + 操作 ----------------
-C_SYSTEM = """你是投资研究报告定稿器。只依据用户给的观点与暗示条目，输出一个 JSON（不要解释）：
-{"market": "反弹/反转/见顶/调整/防御 选一个 + 一句依据",
- "action": {"direction": "看多/看空/观望 选一个", "position": "仓位建议一句话", "risk": "最需要警惕的风险一句话"},
- "continuity": "延续/升级/新增/反转 + 说明；没有历史就写 首次记录,无历史对比"}
-不要输出占位词，不要抄说明文字。"""
+C_SYSTEM = """你是投资研究报告定稿器。只依据用户给的观点与暗示条目，输出一个 JSON（不要解释、不要代码块）：
+{"market": "市场定性", "action": {"direction": "操作方向", "position": "仓位建议", "risk": "风险点"}, "continuity": "观点连续性"}
+
+填写要求：
+- market 从 反弹/反转/见顶/调整/防御 里选一个，后接一句依据；
+- direction 从 看多/看空/观望 里选一个；
+- position、risk 各写一句本期具体内容；
+- continuity 写 延续/升级/新增/反转 并说明，没有历史就写「首次记录,无历史对比」。
+
+格式示例（只示范怎么填，内容要换成当期的）：
+{"market":"防御：政策面偏暖，但反复提示外部联动与量能不足","action":{"direction":"观望","position":"维持中性仓位，不加杠杆","risk":"外部市场传导、情绪过热与杠杆资金"},"continuity":"首次记录,无历史对比"}"""
 
 
 def _post(pcfg, system, user, max_tokens):
@@ -92,6 +98,35 @@ def _history(user_text):
     return (m.group(1).strip() if m else "")[:1500]
 
 
+PLACEHOLDER = ("选一个", "一句话", "说明；", "反弹/反转", "市场定性", "操作方向", "仓位建议", "风险点")
+
+
+def _bad(v):
+    v = str(v or "")
+    return (not v.strip()) or any(m in v for m in PLACEHOLDER)
+
+
+def _fix_c(c, hints):
+    """第三段被模型照抄占位时, 用暗示方向分布兜底"""
+    hs = [h for h in (hints or []) if isinstance(h, dict)]
+    bull = sum(1 for h in hs if "看多" in str(h.get("direction", "")))
+    bear = sum(1 for h in hs if any(k in str(h.get("direction", "")) for k in ("警示", "风险", "看空")))
+    act = c.get("action") if isinstance(c.get("action"), dict) else {}
+    if _bad(c.get("market")):
+        c["market"] = ("防御：警示类条目多于看多项，整体偏谨慎" if bear > bull
+                       else "反弹：看多类条目偏多，但仍需量能确认")
+    if _bad(act.get("direction")):
+        act["direction"] = "观望" if bear >= bull else "看多"
+    if _bad(act.get("position")):
+        act["position"] = "维持中性仓位，不加杠杆"
+    if _bad(act.get("risk")):
+        act["risk"] = "外部市场传导、情绪过热与杠杆风险"
+    if _bad(c.get("continuity")):
+        c["continuity"] = "首次记录,无历史对比"
+    c["action"] = act
+    return c
+
+
 def run(pcfg, user_text):
     sub = _subtitle(user_text)
     hist = _history(user_text)
@@ -104,6 +139,7 @@ def run(pcfg, user_text):
                         "hints": b.get("hints")}, ensure_ascii=False)[:4000]
     c_user = f"【观点与暗示】\n{brief}\n\n【历史报告摘要】\n{hist or '(无历史报告)'}"
     c = _post(pcfg, C_SYSTEM, c_user, 500)
+    c = _fix_c(c, b.get("hints"))
 
     return render({**a, **b, **c})
 
