@@ -484,6 +484,58 @@ def find_downloaded_mp4(bvid):
     return None
 
 
+def _direct_download(bvid):
+    """直链兜底下载: B站 CDN 对机房 IP 要求带 Range 头, 否则 567/403
+
+    走 playurl(platform=html5) 的 durl 单文件(480p, 音视频已合并),
+    用 Range 流式落盘, 不需要 ffmpeg 合并。
+    """
+    import requests
+    UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+    s = requests.Session()
+    s.headers.update({"User-Agent": UA, "Referer": "https://www.bilibili.com/"})
+    try:
+        spi = s.get("https://api.bilibili.com/x/frontend/finger/spi", timeout=10).json()
+        b3 = (spi.get("data") or {}).get("b_3")
+        if b3:
+            s.cookies.set("buvid3", b3, domain=".bilibili.com")
+        view = s.get("https://api.bilibili.com/x/web-interface/view",
+                     params={"bvid": bvid}, timeout=15).json()
+        cid = view["data"]["cid"]
+        j = s.get("https://api.bilibili.com/x/player/playurl",
+                  params={"bvid": bvid, "cid": cid, "qn": 32, "fnval": 1,
+                          "platform": "html5", "high_quality": 1}, timeout=15).json()
+        durl = ((j.get("data") or {}).get("durl") or [])
+        if not durl:
+            log(f"兜底下载: API 未返回 durl (code={j.get('code')} {j.get('message')})")
+            return None
+        url = durl[0]["url"]
+        outdir = os.path.join(WORKDIR, "downloads", bvid)
+        os.makedirs(outdir, exist_ok=True)
+        dest = os.path.join(outdir, f"{bvid}.mp4")
+        tmp = dest + ".part"
+        r = s.get(url, headers={"Range": "bytes=0-"}, stream=True, timeout=60)
+        r.raise_for_status()
+        total = int(r.headers.get("Content-Length") or 0)
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_content(1 << 20):
+                if chunk:
+                    f.write(chunk)
+        size = os.path.getsize(tmp)
+        if size < 200 * 1024:
+            os.remove(tmp)
+            log(f"兜底下载: 文件过小 {size}B, 丢弃")
+            return None
+        os.replace(tmp, dest)
+        log(f"✅ 兜底下载完成(Range): {dest} {size/1048576:.1f}MB"
+            + (f" / {total/1048576:.1f}MB" if total else ""))
+        return dest
+    except Exception as e:
+        log(f"兜底下载失败: {type(e).__name__}: {e}")
+        return None
+
+
 def download_video(cfg, bvid, retries=None):
     """bilidown dl <BV> video <outdir> mp4 480 1, 返回本地mp4路径或None"""
     retries = cfg["dl_retries"] if retries is None else retries
@@ -513,7 +565,8 @@ def download_video(cfg, bvid, retries=None):
             log(f"✅ 下载完成: {existing}")
             return existing
         log(f"bilidown 返回成功但未找到mp4 (第{i+1}次)\n{out[-300:]}\n{err[-300:]}")
-    return None
+    log("bilidown 全部失败, 改用直链兜底(Range)")
+    return _direct_download(bvid)
 
 
 def expected_duration(video):
