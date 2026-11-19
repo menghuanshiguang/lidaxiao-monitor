@@ -34,7 +34,7 @@
     "cache_ram": 8192
   },
   "llm_local": {
-    "enabled": true,
+    "enabled": false,
     "provider": "local",
     "base_url": "http://127.0.0.1:8080/v1",
     "model": "minicpm5-2b",
@@ -48,9 +48,9 @@
     "provider": "deepseek",
     "base_url": "https://api.deepseek.com",
     "model": "deepseek-flash",
-    "reasoningEffort": "medium",
+    "reasoningEffort": "low",
     "temperature": 0.3,
-    "max_tokens": 4000
+    "max_tokens": 12000
   },
   "vision": {
     "enabled": true,
