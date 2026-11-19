@@ -1689,6 +1689,10 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         providers = [cfg.get("llm_ollama")]
     else:
         providers = []
+        local = cfg.get("llm_local")
+        if (local and local.get("enabled") and _local_llm_alive(local)
+                and local.get("position", "first") == "first"):
+            providers.append(local)            # 本地优先: 校验不过自动回落云端
         free = cfg.get("llm_free")
         if free and free.get("enabled", True):
             providers.append(free)             # 免费层最前, 挂了自动落到下面三级
@@ -1699,10 +1703,9 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         fallback = cfg.get("llm_fallback")
         if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(fallback)
-        # 本地权重放最后: 云端全挂时才兜底, 不占正常耗时(实测小模型质量还不够当主力)
-        local = cfg.get("llm_local")
-        if local and local.get("enabled") and _local_llm_alive(local):
-            providers.append(local)
+        if (local and local.get("enabled") and local.get("position") == "last"
+                and _local_llm_alive(local)):
+            providers.append(local)            # 可选: position=last 时退居兜底
     NO_KEY_PROVIDERS = {"ollama", "local", "llama"}
     last_err = ""
     for pcfg in providers:
