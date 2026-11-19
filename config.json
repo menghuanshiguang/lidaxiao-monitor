@@ -36,12 +36,12 @@
   "llm_local": {
     "enabled": true,
     "provider": "local",
-    "base_url": "http://127.0.0.1:8080/v1",
-    "model": "qwen3.5-9b-heretic",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "rinibr20/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF",
     "temperature": 0.3,
     "max_tokens": 1600,
     "timeout": 900,
-    "enable_thinking": false,
+    "enable_thinking": true,
     "validate": true,
     "position": "first",
     "mode": "json"

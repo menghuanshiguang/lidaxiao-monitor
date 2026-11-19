@@ -134,12 +134,13 @@ jobs:
       - name: Cache local model
         uses: actions/cache@v4
         with:
-          path: models/
-          key: local-llm-qwen35-9b-q4
+          path: .ollama-models
+          key: ollama-qwen35-9b
 
       - name: Run unified monitor (local/cloud adaptive)
         if: ${{ github.event.inputs.smoke != 'true' }}
         env:
+          OLLAMA_MODELS: ${{ github.workspace }}\.ollama-models
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
@@ -156,6 +157,7 @@ jobs:
       - name: Local LLM smoke test
         if: ${{ github.event.inputs.smoke == 'true' }}
         env:
+          OLLAMA_MODELS: ${{ github.workspace }}\.ollama-models
           PYTHONIOENCODING: utf-8
         run: |
           .\scripts\start_local_llm.ps1

@@ -1,44 +1,41 @@
-# 启动本地 Qwen3.5-9B (llama.cpp), 供同一 step 内的 python 调用
-# 注意: GitHub Actions 在 step 结束时会杀掉子进程, 所以必须和调用方在同一个 step
+# 在 Actions 里用 Ollama 拉起本地模型（同一 step 内调用，否则进程会被杀）
+# 模型: rinibr20/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-New-Item -ItemType Directory -Force models | Out-Null
+$OLLAMA_MODEL = "rinibr20/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF"
+$OllamaDir = Join-Path (Get-Location) "ollama"
 
-if (-not (Test-Path "models\qwen35-9b-q4.gguf")) {
-  Write-Host "下载 Qwen3.5-9B Q4_K_M (~5.5GB)..."
-  Invoke-WebRequest -Uri "https://huggingface.co/mradermacher/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF/resolve/main/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic.Q4_K_M.gguf" -OutFile "models\qwen35-9b-q4.gguf" -UseBasicParsing
+if (-not (Test-Path (Join-Path $OllamaDir "ollama.exe"))) {
+  Write-Host "下载 Ollama (windows-amd64)..."
+  Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/download/v0.40.16/ollama-windows-amd64.zip" `
+    -OutFile "$env:RUNNER_TEMP\ollama.zip" -UseBasicParsing
+  Expand-Archive -Path "$env:RUNNER_TEMP\ollama.zip" -DestinationPath $OllamaDir -Force
+}
+$exe = Get-ChildItem -Path $OllamaDir -Recurse -Filter ollama.exe | Select-Object -First 1
+if (-not $exe) { throw "ollama.exe 未找到" }
+
+# 已在跑就别重复起
+$alive = $false
+try { Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null; $alive = $true } catch {}
+
+if (-not $alive) {
+  Write-Host "启动 ollama serve"
+  Start-Process -FilePath $exe.FullName -ArgumentList "serve" -WorkingDirectory $exe.DirectoryName `
+    -RedirectStandardOutput "ollama.log" -RedirectStandardError "ollama.err.log" -WindowStyle Hidden
+  for ($i = 0; $i -lt 60; $i++) {
+    try { Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags" -TimeoutSec 3 | Out-Null; $alive = $true; break }
+    catch { Start-Sleep -Seconds 2 }
+  }
+}
+if (-not $alive) {
+  if (Test-Path ollama.err.log) { Get-Content ollama.err.log -Tail 30 }
+  throw "ollama serve 启动失败"
 }
 
-if (-not (Test-Path "llama\llama-server.exe")) {
-  Write-Host "下载 llama.cpp (win-cpu)..."
-  Invoke-WebRequest -Uri "https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-win-cpu-x64.zip" -OutFile "$env:RUNNER_TEMP\llama.zip" -UseBasicParsing
-  Expand-Archive -Path "$env:RUNNER_TEMP\llama.zip" -DestinationPath "llama" -Force
-}
+# 拉模型（已缓存则秒过）
+Write-Host "ollama pull $OLLAMA_MODEL"
+& $exe.FullName pull $OLLAMA_MODEL
+if ($LASTEXITCODE -ne 0) { throw "ollama pull 失败 exit=$LASTEXITCODE" }
 
-$exe = Get-ChildItem -Path llama -Recurse -Filter llama-server.exe | Select-Object -First 1
-if (-not $exe) { throw "llama-server.exe 未找到" }
-
-$modelPath = (Resolve-Path "models\qwen35-9b-q4.gguf").Path
-$logOut = Join-Path (Get-Location) "llama-server.log"
-$logErr = Join-Path (Get-Location) "llama-server.err.log"
-
-Write-Host "启动 llama-server: $($exe.FullName)"
-Start-Process -FilePath $exe.FullName -WorkingDirectory $exe.DirectoryName `
-  -ArgumentList @("-m", $modelPath, "-c", "16384", "-t", "4", "--jinja",
-                  "--host", "127.0.0.1", "--port", "8080", "--no-webui") `
-  -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden
-
-$ok = $false
-for ($i = 0; $i -lt 180; $i++) {
-  try {
-    $r = Invoke-RestMethod -Uri "http://127.0.0.1:8080/health" -TimeoutSec 3
-    if ($r.status -eq "ok" -or $r) { $ok = $true; break }
-  } catch { Start-Sleep -Seconds 2 }
-}
-if (-not $ok) {
-  if (Test-Path $logErr) { Get-Content $logErr -Tail 40 }
-  if (Test-Path $logOut) { Get-Content $logOut -Tail 40 }
-  throw "本地模型启动失败"
-}
-Write-Host "本地模型就绪 (http://127.0.0.1:8080)"
+Write-Host "本地模型就绪 (Ollama @ http://127.0.0.1:11434/v1)"
