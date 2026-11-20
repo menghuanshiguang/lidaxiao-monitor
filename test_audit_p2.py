@@ -18,7 +18,8 @@ def chk(name, cond, extra=""):
 print("BUG-10 点位语境")
 s = "2689点就是924行情的起点，当时指数才2000多点。"
 r = A.fix_point_context(s)
-chk("补指数名+语境", "上证2689点（上证924行情起点）" in r, r)
+chk("正文只补指数名", "上证2689点" in r and "（上证924行情起点）" not in r, r)
+chk("清单项补语境", "（上证924行情起点）" in A.fix_point_context("- 参考位: 2689点\n"))
 s2 = "上证2689点，2024年9月24日启动。"
 chk("已带正确日期不重复", A.fix_point_context(s2).count("924行情起点") == 0)
 s3 = "上证2635点，是2024年2月5日的低点。"
