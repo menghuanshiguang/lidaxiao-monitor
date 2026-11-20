@@ -11,10 +11,6 @@ on:
         description: '强制处理最新视频 (--force, 豁免 baseline 日期过滤)'
         type: boolean
         default: false
-      smoke:
-        description: '只自检本地模型链路(不跑监控)'
-        type: boolean
-        default: false
 
 concurrency:
   group: lidaxiao-monitor
@@ -26,7 +22,7 @@ permissions:
 jobs:
   monitor:
     runs-on: windows-latest
-    timeout-minutes: 240
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -131,37 +127,19 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
-      - name: Cache local model
-        uses: actions/cache@v4
-        with:
-          path: .ollama-models
-          key: ollama-qwen35-9b
-
       - name: Run unified monitor (local/cloud adaptive)
-        if: ${{ github.event.inputs.smoke != 'true' }}
         env:
-          OLLAMA_MODELS: ${{ github.workspace }}\.ollama-models
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
         run: |
-          .\scripts\start_local_llm.ps1
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
           $force = "${{ github.event.inputs.force }}"
           if ($force -eq "true") { python lidaxiao.py --once --force }
           else { python lidaxiao.py --once }
-
-      - name: Local LLM smoke test
-        if: ${{ github.event.inputs.smoke == 'true' }}
-        env:
-          OLLAMA_MODELS: ${{ github.workspace }}\.ollama-models
-          PYTHONIOENCODING: utf-8
-        run: |
-          .\scripts\start_local_llm.ps1
-          python bench/local_smoke.py
 
       - name: Upload reports as artifact
         uses: actions/upload-artifact@v4

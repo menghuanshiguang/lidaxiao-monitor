@@ -1734,8 +1734,8 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
             # 任何 provider 返回超时/未获取回答都视为失败, 继续下一个兜底
             if "超时未获取回答" in out or "未获取回答" in out:
                 raise RuntimeError(f"{provider} 返回超时未获取回答")
-            if pcfg.get("validate", True):
-                ref = user if provider in ("local", "llama") else ""
+            if provider in ("local", "llama") and pcfg.get("validate", True):
+                ref = user
                 ok, miss = validate_report(out, ref)
                 if not ok:
                     tag = "本地模型" if provider in ("local", "llama") else provider

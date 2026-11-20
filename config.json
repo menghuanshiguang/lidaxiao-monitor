@@ -34,7 +34,7 @@
     "cache_ram": 8192
   },
   "llm_local": {
-    "enabled": true,
+    "enabled": false,
     "provider": "local",
     "base_url": "http://127.0.0.1:11434/v1",
     "model": "rinibr20/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-GGUF",
