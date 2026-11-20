@@ -41,6 +41,11 @@ import urllib.request
 
 # ---------- 常量 ----------
 WORKDIR = os.path.dirname(os.path.abspath(__file__))
+
+try:
+    import audit_p2 as _audit
+except Exception:  # pragma: no cover - 模块缺失时不影响主流程
+    _audit = None
 STATE_DIR = os.path.join(WORKDIR, "state")   # 云端/本地共享状态, 入库同步
 # bash 路径可用环境变量 BILIDOWN_BASH 覆盖 (如 WSL/GitBash 安装在不同位置)
 BASH = os.environ.get("BILIDOWN_BASH", r"D:\Program Files\Git\bin\bash.exe")
@@ -1212,6 +1217,9 @@ def ending_md(rec):
         rest.append(ln)
 
     out = ["### 📽 片尾画面识别", ""]
+    if _audit:
+        out.append(_audit.visual_note(rec))
+        out.append("")
     # "无" 或空 表示没有标志性图形, 不额外占据显眼位置
     if metaphor and metaphor not in ("无", "none", "None"):
         out.append(f"**🎯 画面图形暗示: {metaphor}**")
@@ -1950,6 +1958,9 @@ def tighten_analysis(text, subtitle="", history=""):
             trig = "不适用"
         t = t[:m.start(1)] + f"\n- **动作**: {act}\n- **仓位**: {pos}\n- **触发**: {trig}\n" + t[m.end(1):]
 
+    if _audit:
+        t = _audit.fix_point_context(t)
+        t = _audit.fix_continuity(t, history)
     return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
@@ -2084,6 +2095,8 @@ def upsert_report(video, section_md, summary_line, list_line):
         section_md = re.sub(r"^## 视频\d+:", f"## 视频{num}:", section_md, count=1)
         text = text.rstrip() + "\n\n" + section_md + "\n"
         log(f"报告已追加视频#{num}: {rp}")
+    if _audit:
+        text = _audit.resort_report(text)
     write_text(rp, text)
     return rp
 
@@ -2094,6 +2107,10 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
     if warn:
         head += f"\n\n> ⚠️ {warn}"
     emd = ending_md(ending).strip()
+    if emd and analysis and _audit:
+        _cn = _audit.conflict_note((ending or {}).get("text", ""), analysis)
+        if _cn:
+            emd = emd + "\n\n" + _cn
 
     def with_tail(text):
         """片尾块插在免责声明之前, 保证"以上为...不构成投资建议"仍是章节最后一行"""
@@ -2117,7 +2134,10 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
     m = re.search(r"【一句话摘要】\s*(.+)", analysis)
     if m:
         one_line = m.group(1).strip()
-    summary_line = f"- 视频《{video['title']}》: {one_line}" if one_line else ""
+    if _audit:
+        summary_line = _audit.make_summary_line(video["title"], analysis)
+    else:
+        summary_line = f"- 视频《{video['title']}》: {one_line}" if one_line else ""
     return (with_tail(head + "\n\n" + analysis.strip()), summary_line)
 
 
