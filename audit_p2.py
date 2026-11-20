@@ -41,10 +41,12 @@ def fix_point_context(text):
         head = text[max(0, m.start() - 4):m.start()]
         prefix = "" if any(n in head for n in INDEX_NAMES) else "上证"
         dm = re.search(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", win)
-        note = f"（{ctx}）"
         if dm and _date_norm(*dm.groups()) == std_date:
             return m.group(0)
-        return f"{prefix}{num}点{note}"
+        # 日期写错, 或出现在清单项里 -> 补标准语境; 其余只补指数名, 避免正文注水
+        line_head = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+        want_note = bool(dm) or bool(re.match(r"\s*[-*]\s", line_head))
+        return f"{prefix}{num}点" + (f"（{ctx}）" if want_note else "")
 
     return re.sub(r"(?<!\d)(\d{4})点(?!\d)", rep, text)
 
