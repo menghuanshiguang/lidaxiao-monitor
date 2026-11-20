@@ -1933,11 +1933,15 @@ def tighten_analysis(text, subtitle="", history=""):
     m = blk("操作含义")
     if m:
         body = m.group(1)
-        d = re.search(r"方向\**?[:：]\s*(.+)", body)
-        pz = re.search(r"仓位\**?[:：]\s*(.+)", body)
-        rk = re.search(r"风险\**?[:：]\s*(.+)", body)
+        d = re.search(r"方向[*\s]*[:：]\s*(.+)", body)
+        pz = re.search(r"仓位[*\s]*[:：]\s*(.+)", body)
+        rk = re.search(r"风险[*\s]*[:：]\s*(.+)", body)
         act = (d.group(1).strip() if d else "")
-        act = {"看多": "持有", "看空": "减仓", "观望": "观望"}.get(act, act or "不适用")
+        if "观望" in act: act = "观望"
+        elif "空" in act: act = "减仓"
+        elif "多" in act: act = "持有"
+        elif act in ("加仓","减仓","持有","不适用"): pass
+        else: act = "不适用"
         pos = (pz.group(1).strip() if pz else "不适用")
         if not re.search(r"\d", pos) or re.search(r"(长期持有|适度|合理|注意)", pos):
             pos = "不适用"
