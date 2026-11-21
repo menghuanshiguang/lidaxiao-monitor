@@ -986,6 +986,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
             fb = tuple(xcfg.get("band_fallback") or (0.55, 1.0))
             # Xiaomi 不返回真实坐标 -> 用画面行投影定位, 失败回退默认带
             band = probe_band_heuristic(frames) or fb
+            stats["band_auto"] = True
             stats["band"] = band
         else:
             band = tuple(xband)
@@ -997,7 +998,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
     log(f"主扫描完成: 有效 {len(out_lines)} 条/{len(frames)} 帧")
 
     # 2.5) 片尾补扫: 声明卡/荐书卡比口播字幕高得多, 紧凑带会切掉上沿 -> 用整帧补最后 10%
-    if band:
+    if band and stats.get("band_auto"):
         tail_n = max(8, len(frames) // 10)
         extra = scan(range(max(0, len(frames) - tail_n), len(frames)), None)
         if extra:
