@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import statistics
+import tempfile
 import subprocess
 import time
 import urllib.request
@@ -30,7 +31,7 @@ def start_server(extra):
            "--host", "127.0.0.1", "--port", str(PORT), "--jinja", "--no-webui"]
     if extra:
         cmd += extra
-    log = open(f"/tmp/server_{PORT}.log", "w")
+    log = open(os.path.join(tempfile.gettempdir(), f"server_{PORT}.log"), "w")
     p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
     for _ in range(120):
         try:
@@ -71,7 +72,7 @@ def crop_srcs():
     for i, p in enumerate(sorted(glob.glob("bench/visionset/*.jpg"))):
         im = Image.open(p)
         w, h = im.size
-        d = f"/tmp/v2_{i}.jpg"
+        d = os.path.join(tempfile.gettempdir(), f"v2_{i}.jpg")
         im.crop((0, int(h * 0.70), w, int(h * 0.97))).save(d, quality=92)
         out.append((os.path.basename(p), d))
     return out
