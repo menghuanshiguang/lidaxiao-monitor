@@ -31,7 +31,9 @@ def start_server(extra):
            "--host", "127.0.0.1", "--port", str(PORT), "--jinja", "--no-webui"]
     if extra:
         cmd += extra
-    log = open(os.path.join(tempfile.gettempdir(), f"server_{PORT}.log"), "w")
+    logpath = os.path.join(tempfile.gettempdir(), f"server_{PORT}.log")
+    log = open(logpath, "w")
+    print("CMD:", " ".join(cmd), flush=True)
     p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
     for _ in range(120):
         try:
@@ -39,7 +41,15 @@ def start_server(extra):
             return p
         except Exception:
             time.sleep(1)
-    raise SystemExit("server 起不来, 见 /tmp/server_%d.log" % PORT)
+    log.flush()
+    try:
+        with open(logpath, encoding="utf-8", errors="replace") as f:
+            tail = f.readlines()[-30:]
+        print("---- server log ----\n" + "".join(tail), flush=True)
+    except Exception:
+        pass
+    p.kill()
+    raise SystemExit(f"server 起不来 (port {PORT}), 见上方日志")
 
 
 def ocr(img, max_tokens):
