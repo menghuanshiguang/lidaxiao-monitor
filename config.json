@@ -79,5 +79,16 @@
     "model": "deepseek-flash",
     "max_tokens": 6000,
     "timeout": 240
+  },
+  "ocr_engine": "xiaomi",
+  "xiaomi_ocr": {
+    "server_bin": "llama/llama-server.exe",
+    "model": "llama/xiaomi-ocr-0-q4km.gguf",
+    "mmproj": "llama/xiaomi-ocr-0-mmproj.gguf",
+    "port": 8099,
+    "ctx": 2048,
+    "max_tokens": 192,
+    "threads": 4,
+    "timeout": 180
   }
 }

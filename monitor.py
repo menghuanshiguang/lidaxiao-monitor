@@ -777,9 +777,32 @@ def probe_subtitle_band(engine, frames, conf):
 
 
 def ocr_video(cfg, video_path, bvid):
-    """返回 (字幕文本, 统计) ; 文本为空表示无字幕"""
+    """返回 (字幕文本, 统计) ; 文本为空表示无字幕
+
+    引擎选择: config.ocr_engine = "xiaomi" 时先起常驻 llama-server 跑 Xiaomi-OCR-0,
+    起不来/中途失效自动回退 RapidOCR。
+    """
+    xm = None
+    if (cfg.get("ocr_engine") or "rapid") == "xiaomi":
+        try:
+            from xiaomi_ocr import XiaomiOCR
+            xm = XiaomiOCR(cfg.get("xiaomi_ocr") or {}, log=log)
+            if not xm.start():
+                log("⚠ Xiaomi-OCR 启动失败, 本次回退 RapidOCR")
+                xm = None
+        except Exception as e:
+            log(f"⚠ Xiaomi-OCR 不可用({e}), 回退 RapidOCR")
+            xm = None
+    try:
+        return _ocr_video_impl(cfg, video_path, bvid, xm)
+    finally:
+        if xm is not None:
+            xm.stop()
+
+
+def _ocr_video_impl(cfg, video_path, bvid, xm=None):
     from difflib import SequenceMatcher
-    engine = get_ocr()
+    engine = xm or get_ocr()
     conf = cfg["ocr_confidence"]
     dur = ffprobe_duration(video_path)
     interval = cfg.get("frame_interval") or max(1.0, min(4.0, dur / 160.0))
@@ -787,13 +810,20 @@ def ocr_video(cfg, video_path, bvid):
     if not frames:
         log("抽帧失败, 无帧可OCR")
         return "", {"frames": 0}
-    stats = {"frames": len(frames), "ocr_ok": 0, "ocr_empty": 0}
+    stats = {"frames": len(frames), "ocr_ok": 0, "ocr_empty": 0,
+             "engine": "xiaomi" if xm is not None else "rapid"}
+    log(f"OCR 引擎: {stats['engine']}")
 
     def scan(frames_idx, band):
         """对给定帧序列做 OCR, 返回 [(ts, line)]"""
+        nonlocal engine, band
         out = []
         last_norm = ""
         for i in frames_idx:
+            if xm is not None and xm.dead:
+                log("⚠ Xiaomi-OCR 中途失效, 切换 RapidOCR")
+                engine = get_ocr()
+                band = probe_subtitle_band(engine, frames, conf)
             boxes = ocr_frame(engine, frames[i], band)
             if not boxes:
                 continue
@@ -815,7 +845,8 @@ def ocr_video(cfg, video_path, bvid):
         return out
 
     # 1) 探测字幕带
-    band = probe_subtitle_band(engine, frames, conf)
+    # Xiaomi-OCR 直接读整帧(实测整帧 0.4-0.7s/帧), 省掉字幕带探测
+    band = None if xm is not None else probe_subtitle_band(engine, frames, conf)
 
     # 2) 主扫描
     out_lines = scan(range(len(frames)), band)
