@@ -730,8 +730,16 @@ def norm_text(s):
     return CLEAN_RE.sub("", s)
 
 
-WM_RE = re.compile(r"(加我粉丝团|求关注|点个关注|关注一下|一键三连|点赞投币|"
-                    r"点赞|投币|收藏|转发|弹幕|粉丝团)")
+# 频道水印: 整帧扫描(片尾补扫/兜底)会把左上角“李大霄 bilibili”读进字幕,
+# 这些词在口播正文里不会出现, 直接剥掉; 中文名只在其后紧跟拉丁字母时才算水印,
+# 避免误伤正文里提到的“李大霄”。
+WM_RE = re.compile(
+    r"(加我粉丝团|求关注|点个关注|关注一下|一键三连|点赞投币|"
+    r"点赞|投币|收藏|转发|弹幕|粉丝团|"
+    r"bili\w*|LIDAXIAO|"
+    r"(?:李大霄|李大海|李大销)\s*(?=bili)|"
+    r"\bB站\b)",
+    re.I)
 
 
 def filter_ocr_text(text, conf_threshold):
@@ -739,7 +747,8 @@ def filter_ocr_text(text, conf_threshold):
     t = text.strip()
     if not t:
         return None
-    t = WM_RE.sub("", t).strip(" ,，。.、:：|/")
+    t = WM_RE.sub(" ", t).strip(" ,，。.、:：|/")
+    t = re.sub(r"\s{2,}", " ", t).strip()
     if not t:
         return None
     if TS_RE.match(t):

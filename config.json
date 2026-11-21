@@ -90,10 +90,7 @@
     "max_tokens": 192,
     "threads": 4,
     "timeout": 180,
-    "band": [
-      0.55,
-      1.0
-    ],
+    "band": "auto",
     "band_fallback": [
       0.55,
       1.0
