@@ -1,0 +1,124 @@
+name: LiDaxiao Monitor (Ubuntu)
+
+# 并行验证用: 只手动触发, 验证通过后再替换 windows 版
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '强制处理最新视频 (--force)'
+        type: boolean
+        default: false
+      ocr_engine:
+        description: 'OCR 引擎覆盖 (留空=config.json; rapid / xiaomi)'
+        type: string
+        default: ''
+
+concurrency:
+  group: lidaxiao-monitor        # 与 windows 版共用锁, 避免同时写仓库
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libgl1 libglib2.0-0
+          python -m pip install --disable-pip-version-check -q -r requirements.txt
+          ffmpeg -version | head -1
+
+      - name: Cache Xiaomi-OCR engine
+        uses: actions/cache@v4
+        with:
+          path: llama
+          key: xiaomi-ocr-${{ runner.os }}-b12503-v2
+
+      - name: Prepare Xiaomi-OCR engine
+        run: bash scripts/setup_xiaomi_ocr.sh
+
+      - name: Clone bilidown CLI
+        run: git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
+
+      - name: Clone deepseek-chat-cli
+        run: git clone --depth 1 https://github.com/menghuanshiguang/deepseek-chat-cli.git _repo/deepseek-chat-cli
+
+      - name: Install deepseek-chat-cli deps
+        run: pip install --disable-pip-version-check -q -r _repo/deepseek-chat-cli/requirements.txt
+
+      - name: Clone deepseek-vision-cli
+        continue-on-error: true      # 第 3 级通道, 缺浏览器不影响主链路
+        run: git clone --depth 1 https://github.com/menghuanshiguang/deepseek-vision-cli.git _repo/deepseek-vision-cli
+
+      - name: Write Bilibili cookies (from secret)
+        env:
+          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
+        run: |
+          python3 - <<'PY'
+          import base64, os, pathlib, sys
+          raw = os.environ.get("COOKIES_B64", "").strip()
+          if not raw:
+              sys.exit("缺少 BILIBILI_COOKIES_B64 secret (B站登录cookies, base64)")
+          data = base64.b64decode(raw)
+          pathlib.Path("data").mkdir(exist_ok=True)
+          cache = pathlib.Path.home() / ".cache"
+          cache.mkdir(parents=True, exist_ok=True)
+          (cache / "bilibili-login-cookies.txt").write_bytes(data)
+          pathlib.Path("data/cookies.txt").write_bytes(data)
+          print(f"cookies 写入完成 ({len(data)} bytes)")
+          PY
+
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: lidaxiao-data-${{ github.ref }}
+          restore-keys: |
+            lidaxiao-data-
+
+      - name: Run unified monitor
+        env:
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          PYTHONIOENCODING: utf-8
+          LIDAXIAO_OCR_ENGINE: ${{ github.event.inputs.ocr_engine }}
+          BILIDOWN_BASH: bash
+        run: |
+          rm -f data/monitor.lock
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            b=$(cat data/last_bvid.txt 2>/dev/null || true)
+            [ -n "$b" ] && rm -f "data/subtitles/$b.txt"
+            python lidaxiao.py --once --force
+          else
+            python lidaxiao.py --once
+          fi
+
+      - name: Upload subtitles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: subtitles-${{ github.run_id }}
+          path: data/subtitles/
+          retention-days: 7
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
