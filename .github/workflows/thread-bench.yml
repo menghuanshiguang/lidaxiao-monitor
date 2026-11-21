@@ -18,15 +18,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: llama
-          key: xiaomi-ocr-Windows-b12503-v1
+          key: xiaomi-ocr-Windows-b12503-v2
       - name: Prepare engine
         shell: bash
         run: bash scripts/setup_xiaomi_ocr.sh
       - name: Threads matrix
         shell: bash
         env:
-          OCR_MODEL: llama/xiaomi-ocr0-q4km.gguf
-          OCR_MMPROJ: llama/xiaomi-ocr0-mmproj.gguf
+          OCR_MODEL: llama/xiaomi-ocr-0-q4km.gguf
+          OCR_MMPROJ: llama/xiaomi-ocr-0-mmproj.gguf
           LLAMA_DIR: llama
           REPEAT: '2'
         run: |
