@@ -31,6 +31,8 @@ def _clean(t):
 
 
 class XiaomiOCR:
+    provides_boxes = True      # 返回值已是 (y, x, text, score), 不走 RapidOCR 的解析分支
+
     def __init__(self, conf, log=print):
         self.conf = conf or {}
         self.log = log

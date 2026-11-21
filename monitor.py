@@ -706,6 +706,8 @@ def ocr_frame(engine, img_path, band=None):
     if band:
         y0, y1 = int(h * band[0]), int(h * band[1])
         img = img[max(0, y0):max(0, y1), :]
+    if getattr(engine, "provides_boxes", False):
+        return engine(img)          # Xiaomi-OCR: 直接返回 (y,x,text,score)
     result, _ = engine(img)
     boxes = []
     if result:
