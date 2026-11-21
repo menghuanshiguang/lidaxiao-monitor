@@ -77,5 +77,16 @@ out = A.resort_report(doc2)
 chk("清单按时间升序", out.index("BVaaa") < out.index("BVccc"), out)
 chk("章节重编号", "## 视频1:《A》" in out and "## 视频2:《C》" in out, out)
 
+# ---- BUG-14b: 摘要兜底 (格式跑偏时不得整条消失) ----
+_flat = ("\n美股AI泡沫正被1,000亿美元大模型抽资、债市抢钱和强美元三重挤压走向爆破，"
+         "李大霄明确定性“从进攻转向防御”。\n\n"
+         "1. 美股的AI硬件板块遭遇单周系统性崩塌 (原文数据: 跌8.5%)\n")
+ln = A.make_summary_line("美股的输入性风险不得不防", _flat)
+chk("摘要兜底: 无标记也产出", ln.startswith("- 视频《美股的输入性风险不得不防》:"), ln)
+chk("摘要兜底: 数字逗号不断句", "1,000亿美元" in ln, ln)
+ln2 = A.make_summary_line("t", "【一句话摘要】x\n【核心观点】\n1. 隔夜美股出现崩盘，这正是他提醒了小半年的风险爆破")
+chk("摘要: 首句太短继续取", "崩盘，这正是他提醒了小半年" in ln2, ln2)
+
 print(f"\n{ok} passed, {fail} failed")
 raise SystemExit(1 if fail else 0)
+

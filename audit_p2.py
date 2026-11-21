@@ -112,6 +112,33 @@ def conflict_note(ending_text, analysis):
             f"{'/'.join(pa)}点。正文以字幕为准，片尾仅作参考。")
 
 
+def _clip(s, limit=64, min_first=12):
+    """截到 60 字左右, 优先在逗号处断句, 但不动 "1,000" 这类数字里的逗号;
+    首个分句太短(<min_first 字)就继续往后取, 免得摘要变成半截词。"""
+    s = (s or "").strip().strip("。 ")
+    for m in re.finditer(r"(?<!\d)[，,；;](?!\d)", s):
+        if m.start() >= min_first:
+            return s[:m.start()].strip("。 ")
+    return s[:limit] + ("…" if len(s) > limit else "")
+
+
+def _fallback_point(analysis):
+    """格式跑偏兜底: 正文没有【一句话摘要】/【核心观点】标记时,
+    取第一段象样的话当摘要, 保证视频不会从今日摘要里整条消失。"""
+    for ln in (analysis or "").splitlines():
+        s = ln.strip()
+        if not s or s[0] in "#->|":
+            continue
+        if s.startswith(("【", "以上为", "> ")):
+            continue
+        s = re.sub(r"^\d+[.、]\s*", "", s)
+        s = re.sub(r"[（(]原文数据.*?[)）]", "", s).strip()
+        s = _clip(s)
+        if len(s) >= 8:
+            return s
+    return ""
+
+
 def make_summary_line(title, analysis):
     """BUG-14: 今日摘要不得与正文『一句话摘要』逐字重复。
 
@@ -133,10 +160,12 @@ def make_summary_line(title, analysis):
         pm = re.search(r"(?m)^\s*1\.\s*(.+)$", mp.group(1))
         if pm:
             pt = re.sub(r"[（(]原文数据.*?[)）]", "", pm.group(1)).strip()
-            pt = re.split(r"[，,；;]", pt)[0]
-    pt = pt[:64].rstrip("。；;，,")
+            pt = _clip(pt)
+    pt = pt.rstrip("。；;，,")
     if not pt:
-        pt = one[:70].rstrip("。；;，,") + ("…" if len(one) > 70 else "")
+        pt = _clip(one, limit=70)
+    if not pt:
+        pt = _fallback_point(analysis)
     if not pt:
         return ""
     head = f"**{act}**｜" if act and act not in ("不适用", "无") else ""

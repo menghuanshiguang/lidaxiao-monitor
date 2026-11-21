@@ -2175,6 +2175,8 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
     if analysis is None:
         return (with_tail(head + "\n\n> ⚠️ AI分析失败, 仅保留字幕"), "")
     one_line = ""
+    if "【一句话摘要】" not in analysis:
+        log(f"⚠️ 分析缺少【一句话摘要】标记(BV {video['bvid']}), 摘要走兜底")
     m = re.search(r"【一句话摘要】\s*(.+)", analysis)
     if m:
         one_line = m.group(1).strip()

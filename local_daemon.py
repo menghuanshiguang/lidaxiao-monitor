@@ -292,6 +292,20 @@ def _digest_maps(text):
     return sums, lists
 
 
+def _sec_time(sec_text, *list_maps):
+    """从章节头取 BV, 再从清单行里找 [HH:MM] 作为排序键"""
+    m = _SEC_RE.search(sec_text)
+    if not m:
+        return "99:99"
+    bvid = m.group(2)
+    for lm in list_maps:
+        ln = lm.get(bvid, "")
+        mt = re.match(r"^-\s*\[(\d{2}:\d{2})\]", ln)
+        if mt:
+            return mt.group(1)
+    return "99:99"
+
+
 def _merge_report(new_text, old_text):
     """合并两份日报: 保留旧报告中不在新报告里的视频章节, 新报告的章节覆盖旧的同BV章节"""
     # 解析旧报告的视频章节 (按BV定位)
@@ -326,14 +340,16 @@ def _merge_report(new_text, old_text):
     if cur_bvid and cur_start is not None:
         new_secs[cur_bvid] = "\n".join(new_lines[cur_start:])
     # 合并: 新报告的章节 + 旧报告中不在新报告里的章节
-    merged_secs = []
-    added = set()
-    for bvid, sec_text in new_secs.items():
-        merged_secs.append(sec_text)
-        added.add(bvid)
+    merged_map = {}
     for bvid, sec_text in old_secs.items():
-        if bvid not in added:
-            merged_secs.append(sec_text)
+        merged_map[bvid] = sec_text
+    for bvid, sec_text in new_secs.items():
+        merged_map[bvid] = sec_text          # 新报告的同BV章节覆盖旧的
+    # 章节按发布时间升序 (时间来自清单行的 [HH:MM]); 少了时间就排最后
+    _olists = _digest_maps(old_text)[1]
+    _nlists = _digest_maps(new_text)[1]
+    merged_secs = sorted(merged_map.values(),
+                         key=lambda t: _sec_time(t, _nlists, _olists))
     # 重建报告: 取新报告的 header + summary + list, 追加合并后的章节
     sec_start = len(new_lines)
     for i, ln in enumerate(new_lines):
