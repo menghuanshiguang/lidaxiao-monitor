@@ -730,9 +730,16 @@ def norm_text(s):
     return CLEAN_RE.sub("", s)
 
 
+WM_RE = re.compile(r"(加我粉丝团|求关注|点个关注|关注一下|一键三连|点赞投币|"
+                    r"点赞|投币|收藏|转发|弹幕|粉丝团)")
+
+
 def filter_ocr_text(text, conf_threshold):
-    """过滤: 低置信度/纯时间戳/过短/行情图表噪声"""
+    """过滤: 低置信度/纯时间戳/过短/行情图表噪声/站内水印"""
     t = text.strip()
+    if not t:
+        return None
+    t = WM_RE.sub("", t).strip(" ,，。.、:：|/")
     if not t:
         return None
     if TS_RE.match(t):
@@ -848,8 +855,11 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
         return out
 
     # 1) 探测字幕带
-    # Xiaomi-OCR 直接读整帧(实测整帧 0.4-0.7s/帧), 省掉字幕带探测
-    band = None if xm is not None else probe_subtitle_band(engine, frames, conf)
+    # Xiaomi-OCR: 用配置的固定字幕带(默认下半屏), 既提速又天然避开顶部水印;
+    # 未配置时才读整帧。RapidOCR 仍走自适应探测。
+    xband = (cfg.get("xiaomi_ocr") or {}).get("band") if xm is not None else None
+    band = (tuple(xband) if xband else None) if xm is not None \
+        else probe_subtitle_band(engine, frames, conf)
 
     # 2) 主扫描
     out_lines = scan(range(len(frames)), band)
