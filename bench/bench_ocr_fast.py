@@ -96,8 +96,7 @@ def main():
                 dt, txt, ct = ocr(path, a.max_tokens)
                 if rep > 0:            # 首轮含预热, 不计入
                     times.append(dt)
-                if rep == 0:
-                    texts.append((name, dt, txt, ct))
+                texts.append((rep, name, dt, txt, ct))
         med = statistics.median(times) if times else 0
         avg = sum(times) / len(times) if times else 0
         line = (f"| {a.tag} | {a.max_tokens} | {avg:.2f} | {med:.2f} "
@@ -105,8 +104,9 @@ def main():
         print("\nRESULT", line, flush=True)
         with open("bench/out/ocr-fast.md", "a", encoding="utf-8") as f:
             f.write(line + "\n")
-            for name, dt, txt, ct in texts:
-                f.write(f"<!-- {a.tag} {name} {dt:.2f}s {ct}tok {txt[:80]!r} -->\n")
+            for rep, name, dt, txt, ct in texts:
+                f.write(f"<!-- {a.tag} r{rep} {name} {dt:.2f}s {ct}tok {txt[:80]!r} -->\n")
+                print(f"  r{rep} {name} {dt:.2f}s {ct}tok {txt[:60]!r}", flush=True)
     finally:
         srv.terminate()
 

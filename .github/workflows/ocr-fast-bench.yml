@@ -36,9 +36,7 @@ jobs:
           mkdir -p bench/out
           printf '| 配置 | max_tokens | 均值s | 中位s | 最快 | 最慢 | 240帧(分钟) |\n|---|---|---|---|---|---|---|\n' > bench/out/ocr-fast.md
           python bench/bench_ocr_fast.py --tag A-默认 --extra "" --max-tokens 64
-          python bench/bench_ocr_fast.py --tag B-img256 --extra "--image-max-tokens 256" --max-tokens 64
           python bench/bench_ocr_fast.py --tag C-img128 --extra "--image-max-tokens 128" --max-tokens 64
-          python bench/bench_ocr_fast.py --tag D-img128_t32 --extra "--image-max-tokens 128" --max-tokens 32
           echo '--- 结果 ---'; cat bench/out/ocr-fast.md
       - uses: actions/upload-artifact@v4
         if: always()
