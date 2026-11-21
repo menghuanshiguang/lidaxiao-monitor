@@ -57,9 +57,12 @@ class XiaomiOCR:
         if not (os.path.exists(bin_) and os.path.exists(model) and os.path.exists(mmproj)):
             self.log(f"Xiaomi-OCR: 文件缺失 bin={bin_} model={model} mmproj={mmproj}")
             return False
+        th = int(self.conf.get("threads", 0) or 0)
         cmd = [bin_, "-m", model, "--mmproj", mmproj,
-               "-c", str(self.conf.get("ctx", 2048)),
-               "-t", str(self.conf.get("threads", 4)),
+               "-c", str(self.conf.get("ctx", 2048))]
+        if th > 0:                      # <=0 表示交给 llama.cpp 按物理核数自决
+            cmd += ["-t", str(th)]
+        cmd += [
                "--host", "127.0.0.1", "--port", str(self.port),
                "--jinja", "--no-webui", "-np", "1"]
         kw = {}
