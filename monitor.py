@@ -783,7 +783,8 @@ def ocr_video(cfg, video_path, bvid):
     起不来/中途失效自动回退 RapidOCR。
     """
     xm = None
-    if (cfg.get("ocr_engine") or "rapid") == "xiaomi":
+    eng = (os.environ.get("LIDAXIAO_OCR_ENGINE") or cfg.get("ocr_engine") or "rapid").lower()
+    if eng == "xiaomi":
         try:
             from xiaomi_ocr import XiaomiOCR
             xm = XiaomiOCR(cfg.get("xiaomi_ocr") or {}, log=log)

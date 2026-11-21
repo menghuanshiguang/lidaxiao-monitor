@@ -11,6 +11,10 @@ on:
         description: '强制处理最新视频 (--force, 豁免 baseline 日期过滤)'
         type: boolean
         default: false
+      ocr_engine:
+        description: 'OCR 引擎覆盖 (留空=用 config.json; rapid / xiaomi)'
+        type: string
+        default: ''
 
 concurrency:
   group: lidaxiao-monitor
@@ -144,6 +148,7 @@ jobs:
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
+          LIDAXIAO_OCR_ENGINE: ${{ github.event.inputs.ocr_engine }}
         run: |
           # 清理可能残留的锁
           Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
@@ -154,6 +159,14 @@ jobs:
             python lidaxiao.py --once --force
           }
           else { python lidaxiao.py --once }
+
+      - name: Upload subtitles (OCR 对比用)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subtitles-${{ github.run_id }}
+          path: data/subtitles/
+          retention-days: 7
 
       - name: Upload reports as artifact
         uses: actions/upload-artifact@v4
