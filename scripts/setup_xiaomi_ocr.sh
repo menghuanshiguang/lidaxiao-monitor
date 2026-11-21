@@ -47,14 +47,17 @@ case "$(uname -s)" in
     ;;
   *)
     ASSET="llama-${TAG}-bin-ubuntu-x64.tar.gz"
-    if [ -f "$DEST/llama-server" ]; then
-      echo "已有 llama-server"; ls -lh "$DEST"; exit 0
+    # 必须同时有动态库: 只有 31K 的 llama-server 是跑不起来的
+    if [ -f "$DEST/llama-server" ] && ls "$DEST"/lib*.so* >/dev/null 2>&1; then
+      echo "已有 llama-server + 动态库"; ls -lh "$DEST"; exit 0
     fi
     echo "下载 $ASSET ..."
     curl -fsL --retry 3 -o /tmp/lc.tgz "https://github.com/ggml-org/llama.cpp/releases/download/${TAG}/${ASSET}"
     rm -rf /tmp/lc && mkdir -p /tmp/lc
     tar xzf /tmp/lc.tgz -C /tmp/lc
     find /tmp/lc -name 'llama-server' -exec cp {} "$DEST/" \;
+    # ubuntu 包是动态链接的: 只有 31K 的可执行体, 必须连同 .so 一起拷
+    find /tmp/lc \( -name '*.so' -o -name '*.so.*' \) -exec cp {} "$DEST/" \; 2>/dev/null || true
     ;;
 esac
 
