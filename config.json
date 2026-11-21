@@ -95,5 +95,5 @@
       1.0
     ]
   },
-  "ocr_dedup": false
+  "ocr_dedup": true
 }
