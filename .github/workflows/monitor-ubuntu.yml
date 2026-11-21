@@ -8,6 +8,10 @@ on:
         description: '强制处理最新视频 (--force)'
         type: boolean
         default: false
+      reocr:
+        description: '强制重新 OCR (清掉字幕缓存, 用于测速/对比)'
+        type: boolean
+        default: false
       ocr_engine:
         description: 'OCR 引擎覆盖 (留空=config.json; rapid / xiaomi)'
         type: string
@@ -99,6 +103,10 @@ jobs:
           BILIDOWN_BASH: bash
         run: |
           rm -f data/monitor.lock
+          if [ "${{ github.event.inputs.reocr }}" = "true" ]; then
+            rm -f data/subtitles/*.txt
+            echo "已清空字幕缓存, 强制重新 OCR"
+          fi
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             b=$(cat data/last_bvid.txt 2>/dev/null || true)
             [ -n "$b" ] && rm -f "data/subtitles/$b.txt"
