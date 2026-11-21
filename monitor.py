@@ -2213,7 +2213,11 @@ def postprocess_analysis(analysis):
             s = re.sub(r"^#+\s*", "", s)
             s = f"**{s}**"                        # 片尾小标题加粗
         elif s.startswith("#"):
-            continue                              # 模型自造的标题一律丢掉
+            # 模型把标准小节写成 Markdown 标题(### 【一句话摘要】…)时,
+            # 只剥 # 号保留内容 —— 整行丢掉会让该小节连同正文一起消失
+            s = re.sub(r"^#+\s*", "", s).strip()
+            if not s or not re.search(r"【[^】]+】", s):
+                continue                          # 真正的自造标题才丢
         out_lines.append(s)
     analysis = "\n".join(out_lines)
     analysis = re.sub(r"\n{3,}", "\n\n", analysis)
