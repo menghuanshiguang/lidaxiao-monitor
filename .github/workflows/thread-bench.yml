@@ -29,6 +29,8 @@ jobs:
           OCR_MMPROJ: llama/xiaomi-ocr-0-mmproj.gguf
           LLAMA_DIR: llama
           REPEAT: '2'
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: utf-8
         run: |
           mkdir -p bench/out
           printf '| 线程 | 均值s | 中位s | 240帧(分钟) |\n|---|---|---|---|\n' > bench/out/thr.md

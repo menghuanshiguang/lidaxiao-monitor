@@ -4,6 +4,11 @@
 用法: python bench/bench_ocr_fast.py --tag base --extra "" 
       由 workflow 循环调用, 每个配置起一个 server, 测完杀掉。
 """
+import sys
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import argparse
 import base64
 import glob
