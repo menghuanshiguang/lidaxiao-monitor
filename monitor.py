@@ -996,6 +996,14 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
     out_lines = scan(range(len(frames)), band)
     log(f"主扫描完成: 有效 {len(out_lines)} 条/{len(frames)} 帧")
 
+    # 2.5) 片尾补扫: 声明卡/荐书卡比口播字幕高得多, 紧凑带会切掉上沿 -> 用整帧补最后 10%
+    if band:
+        tail_n = max(8, len(frames) // 10)
+        extra = scan(range(max(0, len(frames) - tail_n), len(frames)), None)
+        if extra:
+            out_lines = merge_ts_lines(extra, out_lines)   # 同 ts 时整帧结果优先
+            log(f"片尾补扫(整帧): {len(extra)} 条")
+
     # 3) 字幕太少 -> 兜底: 底部带每2帧 -> 整帧每6帧
     total = sum(len(l) for _, l in out_lines)
     if total < cfg["min_subtitle_chars"]:
