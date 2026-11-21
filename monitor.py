@@ -757,6 +757,61 @@ def filter_ocr_text(text, conf_threshold):
     return t
 
 
+def band_from_points(ys, h, default=(0.55, 1.0), min_h=0.10, pad_ratio=0.6):
+    """把 OCR 到的文字行 y 坐标折成字幕带 (纯函数, 便于单测)
+
+    用 10/90 分位而不是 min/max: 偶发的片尾卡/浮动水印不会把带子拉爆;
+    再按跨度的一定比例外扩, 保证两行字幕和描边不被切。
+    """
+    pts = sorted(y / h for y in ys if 0.05 * h < y < 0.995 * h)
+    if len(pts) < 4:
+        return default
+    med = pts[len(pts) // 2]
+    # 只保留中位数附近的点: 片尾大字/浮动水印这类离群值会把带子拉爆
+    core = [p for p in pts if abs(p - med) <= 0.15] or pts
+    p10 = core[int(0.10 * (len(core) - 1))]
+    p90 = core[int(0.90 * (len(core) - 1))]
+    # y 是文字框顶边, 下方要留出字高; 上方留一点描边余量
+    y0, y1 = max(0.0, p10 - 0.05), min(1.0, p90 + 0.08)
+    if y1 - y0 < min_h:                       # 太窄 -> 以中心补到最小高度
+        c = (y0 + y1) / 2
+        y0 = max(0.0, c - min_h / 2)
+        y1 = min(1.0, y0 + min_h)
+        y0 = max(0.0, y1 - min_h)
+    return (round(y0, 3), round(y1, 3))
+
+
+def detect_band(engine, frames, conf, default=(0.55, 1.0), samples=5):
+    """用模型在若干整帧上找字幕真实位置
+
+    每条视频的字幕位置都可能不同(底部/偏上/居中), 写死带子要么漏字幕要么算半屏。
+    这里抽 5 帧整帧 OCR, 取文字行 y 的分位区间, 失败就回退默认带。
+    """
+    n = len(frames)
+    idx = sorted({int(n * k / samples) for k in range(samples)} | {n // 2})
+    idx = [i for i in idx if 0 <= i < n][:samples + 1]
+    from PIL import Image
+    with Image.open(frames[0]) as im:
+        w, h = im.size
+    ys = []
+    for i in idx:
+        try:
+            for y, x, text, score in ocr_frame(engine, frames[i], None):
+                # 排除顶部 logo 和右上角日期水印
+                if score >= conf and filter_ocr_text(text, conf) \
+                        and 0.03 * w <= x <= 0.97 * w and y > 0.05 * h:
+                    ys.append(y)
+        except Exception as e:
+            log(f"⚠ 字幕带探测取样失败(帧{i}): {e}")
+    if not ys:
+        log(f"字幕带探测: 无文字行, 用默认 {default}")
+        return default
+    band = band_from_points(ys, h, default)
+    log(f"字幕带探测: {len(ys)} 行文字 -> ({band[0]:.2f},{band[1]:.2f}) "
+        f"[样本帧 {len(idx)}]")
+    return band
+
+
 def probe_subtitle_band(engine, frames, conf):
     """探测字幕带 (y0,y1): 排除顶部logo/右上角水印, 优先底部字幕带"""
     import cv2
@@ -877,9 +932,19 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
     # 1) 探测字幕带
     # Xiaomi-OCR: 用配置的固定字幕带(默认下半屏), 既提速又天然避开顶部水印;
     # 未配置时才读整帧。RapidOCR 仍走自适应探测。
-    xband = (cfg.get("xiaomi_ocr") or {}).get("band") if xm is not None else None
-    band = (tuple(xband) if xband else None) if xm is not None \
-        else probe_subtitle_band(engine, frames, conf)
+    xcfg = cfg.get("xiaomi_ocr") or {}
+    xband = xcfg.get("band") if xm is not None else None
+    if xm is not None:
+        if xband in (None, "auto", "AUTO") or (
+                isinstance(xband, (list, tuple)) and xband and str(xband[0]).lower() == "auto"):
+            # 每条视频字幕位置可能不同 -> 让模型先看几帧再定带子
+            fb = tuple(xcfg.get("band_fallback") or (0.55, 1.0))
+            band = detect_band(xm, frames, conf, default=fb)
+            stats["band"] = band
+        else:
+            band = tuple(xband)
+    else:
+        band = probe_subtitle_band(engine, frames, conf)
 
     # 2) 主扫描
     out_lines = scan(range(len(frames)), band)
