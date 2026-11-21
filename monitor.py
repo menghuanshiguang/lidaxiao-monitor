@@ -793,13 +793,29 @@ def probe_band_heuristic(frames, samples=8, min_h=0.10):
     win = max(4, int(0.07 * h))
     peak, start = max(((sum(tot[y:y + win]), y) for y in range(int(0.45 * h), max(1, h - win))))
     thr = peak * 0.15
+    # 允许跨过行间空白(两行字幕之间、字与字的上下留白), 否则只会框住一行
+    gap = max(2, int(0.035 * h))
     lo, hi = start, start + win
-    while lo > 0 and tot[lo - 1] > thr:
-        lo -= 1
-    while hi < h and tot[hi] > thr:
-        hi += 1
-    y0 = max(0.0, lo / h - 0.020)     # 上方留描边余量
-    y1 = min(1.0, hi / h + 0.030)     # 下方留两行/字高余量
+    miss, y = 0, start - 1
+    while y >= 0:
+        if tot[y] > thr:
+            lo, miss = y, 0
+        else:
+            miss += 1
+            if miss > gap:
+                break
+        y -= 1
+    miss, y = 0, hi
+    while y < h:
+        if tot[y] > thr:
+            hi, miss = y + 1, 0
+        else:
+            miss += 1
+            if miss > gap:
+                break
+        y += 1
+    y0 = max(0.0, lo / h - 0.035)     # 上方留描边余量
+    y1 = min(1.0, hi / h + 0.035)     # 下方留字高/两行余量
     if y1 - y0 < min_h:
         c = (y0 + y1) / 2
         y0, y1 = max(0.0, c - min_h / 2), min(1.0, c + min_h / 2)

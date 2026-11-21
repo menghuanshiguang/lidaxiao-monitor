@@ -30,8 +30,11 @@ def make(paths, top_pct, bot_pct, watermark=False, n=8):
         im = Image.new("L", (W, H), 110)
         d = ImageDraw.Draw(im)
         y0, y1 = int(H * top_pct), int(H * bot_pct)
-        d.rectangle([59, y0 - 2, 581, y1 + 2], outline=0, width=3)
-        d.rectangle([61, y0, 579, y1], fill=255)
+        # 模拟汉字笔画: 4px 粗的白条 + 1px 黑描边 (实心大块不符合真实字幕)
+        y = y0
+        while y < y1:
+            d.rectangle([61, y + 1, 579, y + 4], outline=0, fill=255)
+            y += 9
         if watermark:      # 右上角浅色水印, 不该被当成字幕
             d.rectangle([560, 40, 630, 60], fill=180)
         p = os.path.join(tmp, f"w{i}.jpg")
