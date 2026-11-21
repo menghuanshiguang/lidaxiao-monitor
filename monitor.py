@@ -817,7 +817,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
 
     def scan(frames_idx, band):
         """对给定帧序列做 OCR, 返回 [(ts, line)]"""
-        nonlocal engine, band
+        nonlocal engine
         out = []
         last_norm = ""
         for i in frames_idx:
