@@ -138,6 +138,5 @@ class XiaomiOCR:
         out = []
         for i, ln in enumerate(lines):
             y = int(i * h / max(1, len(lines)))
-            box = [(0, y), (w, y), (w, y + 18), (0, y + 18)]
-            out.append((box, ln, 1.0))
+            out.append((y, 0, ln, 1.0))     # 与 ocr_frame 的 (y, x, text, score) 对齐
         return out
