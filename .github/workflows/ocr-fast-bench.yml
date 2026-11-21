@@ -1,0 +1,48 @@
+name: OCR Fast Bench (Xiaomi-OCR-0)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fast-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deps
+        run: pip install --disable-pip-version-check -q pillow
+      - name: Get llama.cpp (cpu)
+        run: |
+          curl -sL -o lc.tar.gz https://github.com/ggml-org/llama.cpp/releases/download/b12503/llama-b12503-bin-ubuntu-x64.tar.gz
+          tar xzf lc.tar.gz
+          BIN=$(find . -name llama-server -type f | head -1)
+          echo "LLAMA_DIR=$PWD/$(dirname "$BIN")" >> "$GITHUB_ENV"
+      - name: Download model
+        run: |
+          mkdir -p models
+          curl -L --retry 3 -# -o models/xiaomi-ocr0-q4km.gguf \
+            "https://huggingface.co/prithivMLmods/Xiaomi-OCR-0-GGUF/resolve/main/Xiaomi-OCR-0.Q4_K_M.gguf"
+          curl -L --retry 3 -# -o models/xiaomi-ocr0-mmproj.gguf \
+            "https://huggingface.co/prithivMLmods/Xiaomi-OCR-0-GGUF/resolve/main/Xiaomi-OCR-0.mmproj-bf16.gguf"
+      - name: Matrix
+        env:
+          OCR_MODEL: models/xiaomi-ocr0-q4km.gguf
+          OCR_MMPROJ: models/xiaomi-ocr0-mmproj.gguf
+          REPEAT: '3'
+        run: |
+          mkdir -p bench/out
+          printf '| 配置 | max_tokens | 均值s | 中位s | 最快 | 最慢 | 240帧(分钟) |\n|---|---|---|---|---|---|---|\n' > bench/out/ocr-fast.md
+          python bench/bench_ocr_fast.py --tag A-默认 --extra "" --max-tokens 64
+          python bench/bench_ocr_fast.py --tag B-img256 --extra "--image-max-tokens 256" --max-tokens 64
+          python bench/bench_ocr_fast.py --tag C-img128 --extra "--image-max-tokens 128" --max-tokens 64
+          python bench/bench_ocr_fast.py --tag D-img128_t32 --extra "--image-max-tokens 128" --max-tokens 32
+          echo '--- 结果 ---'; cat bench/out/ocr-fast.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ocr-fast-bench
+          path: bench/out/
+          retention-days: 7
