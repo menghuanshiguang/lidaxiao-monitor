@@ -824,12 +824,32 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
              "engine": "xiaomi" if xm is not None else "rapid"}
     log(f"OCR 引擎: {stats['engine']}")
 
+    dedup_on = bool(cfg.get("ocr_dedup", False))
+    env_dedup = os.environ.get("LIDAXIAO_OCR_DEDUP")
+    if env_dedup not in (None, ""):
+        dedup_on = env_dedup.strip().lower() in ("1", "true", "yes", "on")
+    if dedup_on:
+        log("帧去重: 开启 (字幕带差分, 每段只 OCR 中间帧)")
+
     def scan(frames_idx, band):
         """对给定帧序列做 OCR, 返回 [(ts, line)]"""
         nonlocal engine
         out = []
         last_norm = ""
-        for i in frames_idx:
+        idx_list = list(frames_idx)
+        seq = [(i, i) for i in idx_list]
+        if dedup_on and len(idx_list) > 1:
+            try:
+                import frame_dedup as _fd
+                sigs = [_fd.band_sig(frames[i], band) for i in idx_list]
+                seq = _fd.pick_indices(sigs)
+                stats["ocr_calls"] = stats.get("ocr_calls", 0) + len(seq)
+                log(f"帧去重: {len(idx_list)} 帧 -> {len(seq)} 次 OCR "
+                    f"(省 {100 - len(seq) * 100 // max(1, len(idx_list))}%)")
+            except Exception as e:
+                log(f"⚠ 帧去重失败({e}), 退回逐帧")
+                seq = [(i, i) for i in idx_list]
+        for i, ts_i in seq:
             if xm is not None and xm.dead:
                 log("⚠ Xiaomi-OCR 中途失效, 切换 RapidOCR")
                 engine = get_ocr()
@@ -851,7 +871,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
                                   SequenceMatcher(None, n, last_norm).ratio() > 0.85):
                 continue
             last_norm = n
-            out.append((int(i * interval), line))
+            out.append((int(ts_i * interval), line))
         return out
 
     # 1) 探测字幕带
