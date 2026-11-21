@@ -1,0 +1,45 @@
+name: Thread Bench (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tbench:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check -q pillow
+        shell: pwsh
+      - name: Cache engine
+        uses: actions/cache@v4
+        with:
+          path: llama
+          key: xiaomi-ocr-Windows-b12503-v1
+      - name: Prepare engine
+        shell: bash
+        run: bash scripts/setup_xiaomi_ocr.sh
+      - name: Threads matrix
+        shell: bash
+        env:
+          OCR_MODEL: llama/xiaomi-ocr0-q4km.gguf
+          OCR_MMPROJ: llama/xiaomi-ocr0-mmproj.gguf
+          LLAMA_DIR: llama
+          REPEAT: '2'
+        run: |
+          mkdir -p bench/out
+          printf '| 线程 | 均值s | 中位s | 240帧(分钟) |\n|---|---|---|---|\n' > bench/out/thr.md
+          python bench/bench_ocr_fast.py --tag t2  --extra "--threads 2" --max-tokens 96
+          python bench/bench_ocr_fast.py --tag t4  --extra "--threads 4" --max-tokens 96
+          python bench/bench_ocr_fast.py --tag t0  --extra ""            --max-tokens 96
+          cat bench/out/thr.md
+          echo "=== CPU ==="
+          nproc 2>/dev/null || echo "$NUMBER_OF_PROCESSORS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: thr-bench
+          path: bench/out/

@@ -24,7 +24,7 @@ REPEAT = int(os.environ.get("REPEAT", "3"))
 
 def start_server(extra):
     exe = os.path.join(LLAMA_DIR, "llama-server")
-    cmd = [exe, "-m", MODEL, "--mmproj", MMPROJ, "-c", "4096", "-t", "4",
+    cmd = [exe, "-m", MODEL, "--mmproj", MMPROJ, "-c", "4096",
            "--host", "127.0.0.1", "--port", str(PORT), "--jinja", "--no-webui"]
     if extra:
         cmd += extra
