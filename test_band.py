@@ -1,9 +1,11 @@
-"""band_from_points 单测: 字幕带折算要稳 (不切字、不被离群点拉爆)"""
+"""字幕带探测单测: 行投影要能定位白字黑边, 且不吃水印/不框半屏"""
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from monitor import band_from_points as B
+from PIL import Image, ImageDraw
+import monitor
 
 ok = fail = 0
 
@@ -18,28 +20,43 @@ def chk(name, cond, info=""):
         print(f"  ❌ {name}\n     {info}")
 
 
-H = 360
-# 单行字幕: 中心约 0.88
-one = [int(H * 0.88)] * 8
-b1 = B(one, H)
-chk("单行只包住底部", 0.78 <= b1[0] <= 0.86 and 0.90 <= b1[1] <= 1.0, b1)
+tmp = tempfile.mkdtemp()
 
-# 两行字幕: 0.84 / 0.93
-two = [int(H * 0.84)] * 4 + [int(H * 0.93)] * 4
-b2 = B(two, H)
-chk("两行覆盖两行", b2[0] <= 0.84 and b2[1] >= 0.93, b2)
 
-# 离群点(片尾大字/水印)不能把带子拉到中间
-out = one + [int(H * 0.30)] * 2
-b3 = B(out, H)
-chk("离群点不进主体", b3[0] > 0.7, b3)
+def make(paths, top_pct, bot_pct, watermark=False, n=8):
+    W, H = 640, 360
+    out = []
+    for i in range(n):
+        im = Image.new("L", (W, H), 110)
+        d = ImageDraw.Draw(im)
+        y0, y1 = int(H * top_pct), int(H * bot_pct)
+        d.rectangle([59, y0 - 2, 581, y1 + 2], outline=0, width=3)
+        d.rectangle([61, y0, 579, y1], fill=255)
+        if watermark:      # 右上角浅色水印, 不该被当成字幕
+            d.rectangle([560, 40, 630, 60], fill=180)
+        p = os.path.join(tmp, f"w{i}.jpg")
+        im.save(p)
+        out.append(p)
+    return out
 
-# 点太少 -> 回退默认
-chk("样本不足回退", B([int(H * 0.88)] * 3, H) == (0.55, 1.0))
 
-# 极端: 全部挤在一点 -> 补到最小高度
-b4 = B([180] * 10, H)
-chk("最小高度兜底", b4[1] - b4[0] >= 0.099, b4)
+b = monitor.probe_band_heuristic(make([], 0.86, 0.92))
+chk("底部单行能定位", b and b[0] <= 0.86 and b[1] >= 0.92, b)
+chk("不框进半屏", b and (b[1] - b[0]) < 0.25, b)
+
+b2 = monitor.probe_band_heuristic(make([], 0.84, 0.95))
+chk("两行范围包住", b2 and b2[0] <= 0.84 and b2[1] >= 0.95, b2)
+
+b3 = monitor.probe_band_heuristic(make([], 0.86, 0.92, watermark=True))
+chk("水印不干扰", b3 and b3[0] > 0.7, b3)
+
+# 纯色帧 -> 返回 None (调用方回退默认带)
+blank = []
+for i in range(8):
+    p = os.path.join(tmp, f"b{i}.jpg")
+    Image.new("L", (640, 360), 120).save(p)
+    blank.append(p)
+chk("无文字返回 None", monitor.probe_band_heuristic(blank) is None)
 
 print(f"\n{ok} passed, {fail} failed")
 raise SystemExit(1 if fail else 0)

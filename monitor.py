@@ -757,28 +757,56 @@ def filter_ocr_text(text, conf_threshold):
     return t
 
 
-def band_from_points(ys, h, default=(0.55, 1.0), min_h=0.10, pad_ratio=0.6):
-    """把 OCR 到的文字行 y 坐标折成字幕带 (纯函数, 便于单测)
+def probe_band_heuristic(frames, samples=8, min_h=0.10):
+    """用行投影找字幕位置 (不依赖模型坐标)
 
-    用 10/90 分位而不是 min/max: 偶发的片尾卡/浮动水印不会把带子拉爆;
-    再按跨度的一定比例外扩, 保证两行字幕和描边不被切。
+    Xiaomi-OCR 只回文本, y 是按行号等分的伪坐标, 没法用来定位 -> 改从画面本身找:
+    字幕是"纯白字 + 黑描边", 先取 [>=225 的白] ∩ [<=85 的黑膨胀], 再按行投影。
+    主窗口取下半屏得分最高的 7% 高度区块, 再向两侧吞并得分 >15% 峰值的相邻行,
+    这样两行字幕能整段包住, 而单行字幕不会把半屏都框进来。
     """
-    pts = sorted(y / h for y in ys if 0.05 * h < y < 0.995 * h)
-    if len(pts) < 4:
-        return default
-    med = pts[len(pts) // 2]
-    # 只保留中位数附近的点: 片尾大字/浮动水印这类离群值会把带子拉爆
-    core = [p for p in pts if abs(p - med) <= 0.15] or pts
-    p10 = core[int(0.10 * (len(core) - 1))]
-    p90 = core[int(0.90 * (len(core) - 1))]
-    # y 是文字框顶边, 下方要留出字高; 上方留一点描边余量
-    y0, y1 = max(0.0, p10 - 0.05), min(1.0, p90 + 0.08)
-    if y1 - y0 < min_h:                       # 太窄 -> 以中心补到最小高度
+    from PIL import Image, ImageFilter, ImageChops
+    n = len(frames)
+    if not n:
+        return None
+    idx = sorted({int(n * k / samples) for k in range(samples)})
+    tot, h, w = None, 0, 0
+    for i in idx:
+        try:
+            with Image.open(frames[i]) as im:
+                g = im.convert("L")
+                w, h = g.size
+                white = g.point(lambda v: 255 if v >= 225 else 0)
+                dark = g.point(lambda v: 255 if v <= 85 else 0).filter(ImageFilter.MaxFilter(5))
+                t = ImageChops.multiply(white, dark)
+                d = list(t.getdata())
+        except Exception as e:
+            log(f"⚠ 行投影取样失败(帧{i}): {e}")
+            continue
+        if tot is None:
+            tot = [0] * h
+        for y in range(h):
+            row = d[y * w:(y + 1) * w]
+            tot[y] += sum(1 for v in row if v)
+    if not tot or max(tot) < 20:
+        return None
+    win = max(4, int(0.07 * h))
+    peak, start = max(((sum(tot[y:y + win]), y) for y in range(int(0.45 * h), max(1, h - win))))
+    thr = peak * 0.15
+    lo, hi = start, start + win
+    while lo > 0 and tot[lo - 1] > thr:
+        lo -= 1
+    while hi < h and tot[hi] > thr:
+        hi += 1
+    y0 = max(0.0, lo / h - 0.020)     # 上方留描边余量
+    y1 = min(1.0, hi / h + 0.030)     # 下方留两行/字高余量
+    if y1 - y0 < min_h:
         c = (y0 + y1) / 2
-        y0 = max(0.0, c - min_h / 2)
-        y1 = min(1.0, y0 + min_h)
+        y0, y1 = max(0.0, c - min_h / 2), min(1.0, c + min_h / 2)
         y0 = max(0.0, y1 - min_h)
-    return (round(y0, 3), round(y1, 3))
+    band = (round(y0, 3), round(y1, 3))
+    log(f"字幕带探测: 行投影 {len(idx)} 帧 -> ({band[0]:.2f},{band[1]:.2f})")
+    return band
 
 
 def detect_band(engine, frames, conf, default=(0.55, 1.0), samples=5):
@@ -939,7 +967,8 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
                 isinstance(xband, (list, tuple)) and xband and str(xband[0]).lower() == "auto"):
             # 每条视频字幕位置可能不同 -> 让模型先看几帧再定带子
             fb = tuple(xcfg.get("band_fallback") or (0.55, 1.0))
-            band = detect_band(xm, frames, conf, default=fb)
+            # Xiaomi 不返回真实坐标 -> 用画面行投影定位, 失败回退默认带
+            band = probe_band_heuristic(frames) or fb
             stats["band"] = band
         else:
             band = tuple(xband)
