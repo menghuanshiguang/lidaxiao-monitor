@@ -757,7 +757,7 @@ def filter_ocr_text(text, conf_threshold):
     return t
 
 
-def probe_band_heuristic(frames, samples=8, min_h=0.10):
+def probe_band_heuristic(frames, samples=8, min_h=0.18):
     """用行投影找字幕位置 (不依赖模型坐标)
 
     Xiaomi-OCR 只回文本, y 是按行号等分的伪坐标, 没法用来定位 -> 改从画面本身找:
@@ -814,8 +814,9 @@ def probe_band_heuristic(frames, samples=8, min_h=0.10):
             if miss > gap:
                 break
         y += 1
-    y0 = max(0.0, lo / h - 0.035)     # 上方留描边余量
-    y1 = min(1.0, hi / h + 0.035)     # 下方留字高/两行余量
+    # 片尾声明卡字号小、行数多, 比口播字幕更高, 边距要留够
+    y0 = max(0.0, lo / h - 0.050)
+    y1 = min(1.0, hi / h + 0.050)
     if y1 - y0 < min_h:
         c = (y0 + y1) / 2
         y0, y1 = max(0.0, c - min_h / 2), min(1.0, c + min_h / 2)
