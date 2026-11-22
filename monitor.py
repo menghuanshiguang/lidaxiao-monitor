@@ -912,6 +912,18 @@ def ocr_video(cfg, video_path, bvid):
         except Exception as e:
             log(f"⚠ Xiaomi-OCR 不可用({e}), 回退 RapidOCR")
             xm = None
+    elif eng == "aoyuon":
+        try:
+            from aoyuon_ocr import AoyuonOCR
+            xm = AoyuonOCR(cfg.get("aoyuon") or {}, log=log)
+            if not xm.start():
+                log("⚠ Aoyuon-OCR 启动失败, 本次回退 RapidOCR")
+                xm = None
+            else:
+                log("Aoyuon-OCR 已加载 (19.7M int8)")
+        except Exception as e:
+            log(f"⚠ Aoyuon-OCR 不可用({e}), 回退 RapidOCR")
+            xm = None
     try:
         return _ocr_video_impl(cfg, video_path, bvid, xm)
     finally:
@@ -930,7 +942,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
         log("抽帧失败, 无帧可OCR")
         return "", {"frames": 0}
     stats = {"frames": len(frames), "ocr_ok": 0, "ocr_empty": 0,
-             "engine": "xiaomi" if xm is not None else "rapid"}
+             "engine": getattr(xm, "name", None) or ("xiaomi" if xm is not None else "rapid")}
     log(f"OCR 引擎: {stats['engine']}")
 
     dedup_on = bool(cfg.get("ocr_dedup", False))

@@ -96,5 +96,11 @@
       1.0
     ]
   },
-  "ocr_dedup": false
+  "ocr_dedup": false,
+  "aoyuon": {
+    "threads": 4,
+    "vote": true,
+    "pad_a": 6,
+    "pad_b": 12
+  }
 }
