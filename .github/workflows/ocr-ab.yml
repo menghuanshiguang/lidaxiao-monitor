@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           python bench/ab_same_frames.py --frames bench/frames --bvid BV1x3y8zpEGD \
-            --limit ${{ github.event.inputs.limit }} --input ${{ github.event.inputs.mode }} 2>&1 | tee ab.log
+            --limit ${{ github.event.inputs.limit }} --xm-input band --ao-input full 2>&1 | tee ab.log
 
       - name: Upload log
         if: always()
