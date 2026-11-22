@@ -47,6 +47,8 @@ def main():
     ap.add_argument("--frames", default="data/frames")
     ap.add_argument("--bvid", default="BV1x3y8zpEGD")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--input", default="full", choices=["full", "band"],
+                    help="full=整帧交给模型自己找行(其 eval 口径); band=只喂字幕带")
     a = ap.parse_args()
 
     import monitor as M
@@ -61,7 +63,7 @@ def main():
         return 1
 
     band = M.probe_band_heuristic(frames)
-    print(f"帧数={len(frames)} 字幕带={band}", flush=True)
+    print(f"帧数={len(frames)} 字幕带={band if a.input == 'band' else '整帧',}", flush=True)
 
     cfg = M.load_config() if hasattr(M, "load_config") else {}
     xcfg = (cfg.get("xiaomi_ocr") or {}) if isinstance(cfg, dict) else {}
@@ -76,14 +78,14 @@ def main():
         if img is None:
             continue
         h = img.shape[0]
-        crop = img[int(h * band[0]):int(h * band[1])] if band else img
+        crop = img[int(h * band[0]):int(h * band[1])] if (band and a.input == "band") else img
 
         t0 = time.perf_counter()
         xb = xm(crop) if xm is not None and not xm.dead else []
         t1 = time.perf_counter()
 
         t2 = time.perf_counter()
-        ab = rec(crop, is_band=True)
+        ab = rec(crop, is_band=(a.input == "band"))
         t3 = time.perf_counter()
 
         xt = " ".join(b[2] for b in xb if b[2]).strip()
