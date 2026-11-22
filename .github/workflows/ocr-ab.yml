@@ -1,0 +1,59 @@
+name: OCR A/B (same frames)
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '只跑前 N 帧 (0=全部)'
+        type: string
+        default: '0'
+
+jobs:
+  ab:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        shell: pwsh
+        run: |
+          pip install --disable-pip-version-check -q -r requirements.txt
+          pip install --disable-pip-version-check -q onnxruntime
+
+      - name: Cache Xiaomi-OCR engine
+        uses: actions/cache@v4
+        with:
+          path: llama
+          key: xiaomi-ocr-${{ runner.os }}-b12503-v2
+
+      - name: Prepare Xiaomi-OCR engine
+        shell: bash
+        run: bash scripts/setup_xiaomi_ocr.sh
+
+      - name: Restore data cache (frames)
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: lidaxiao-data-${{ github.ref }}
+          restore-keys: |
+            lidaxiao-data-
+
+      - name: Run A/B on same frames
+        shell: bash
+        run: |
+          ls data/frames || true
+          python bench/ab_same_frames.py --frames data/frames --bvid BV1x3y8zpEGD \
+            --limit ${{ github.event.inputs.limit }} 2>&1 | tee ab.log
+
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ab-${{ github.run_id }}
+          path: ab.log
+          retention-days: 7
