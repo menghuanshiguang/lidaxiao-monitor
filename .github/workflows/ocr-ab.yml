@@ -3,6 +3,11 @@ name: OCR A/B (same frames)
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'full=整帧 / band=整带当一行 / band_detect=带内逐行(训练口径)'
+        type: choice
+        options: [band_detect, full, band]
+        default: band_detect
       limit:
         description: '只跑前 N 帧 (0=全部)'
         type: string
@@ -53,7 +58,7 @@ jobs:
         shell: bash
         run: |
           python bench/ab_same_frames.py --frames bench/frames --bvid BV1x3y8zpEGD \
-            --limit ${{ github.event.inputs.limit }} 2>&1 | tee ab.log
+            --limit ${{ github.event.inputs.limit }} --input ${{ github.event.inputs.mode }} 2>&1 | tee ab.log
 
       - name: Upload log
         if: always()

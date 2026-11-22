@@ -25,8 +25,15 @@ sys.path.insert(0, ROOT)
 CLEAN_RE = re.compile(r"[\s\u3000·•\-\|/\\,，。.、;；:：!！?？\"'“”‘’()（）\[\]【】<>《》]+")
 
 
+# 比较前先剥掉"非字幕"内容: 频道水印、日期、时间戳。
+# 不剥的话, 会在整帧口径下把"读到了角标"的引擎算成正确、把干净的算成错误。
+NOISE_RE = re.compile(
+    r"(bilibili|bili\w*|李大霄|李大海|李天高|李大夫|李大森|李大销|"
+    r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}:\d{2})", re.I)
+
+
 def norm(s):
-    return CLEAN_RE.sub("", s or "")
+    return CLEAN_RE.sub("", NOISE_RE.sub(" ", s or ""))
 
 
 def cer(ref, hyp):
@@ -47,7 +54,7 @@ def main():
     ap.add_argument("--frames", default="data/frames")
     ap.add_argument("--bvid", default="BV1x3y8zpEGD")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--input", default="full", choices=["full", "band"],
+    ap.add_argument("--input", default="full", choices=["full", "band", "band_detect"],
                     help="full=整帧交给模型自己找行(其 eval 口径); band=只喂字幕带")
     a = ap.parse_args()
 
@@ -78,14 +85,14 @@ def main():
         if img is None:
             continue
         h = img.shape[0]
-        crop = img[int(h * band[0]):int(h * band[1])] if (band and a.input == "band") else img
+        crop = img[int(h * band[0]):int(h * band[1])] if (band and a.input.startswith("band")) else img
 
         t0 = time.perf_counter()
         xb = xm(crop) if xm is not None and not xm.dead else []
         t1 = time.perf_counter()
 
         t2 = time.perf_counter()
-        ab = rec(crop, is_band=(a.input == "band"))
+        ab = rec(crop, is_band=(a.input == "band"))   # band_detect: 带内自己找行
         t3 = time.perf_counter()
 
         xt = " ".join(b[2] for b in xb if b[2]).strip()
