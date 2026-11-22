@@ -25,6 +25,12 @@ jobs:
           pip install --disable-pip-version-check -q -r requirements.txt
           pip install --disable-pip-version-check -q onnxruntime
 
+      - name: Install ffmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version | Select-Object -First 1
+
       - name: Cache Xiaomi-OCR engine
         uses: actions/cache@v4
         with:
