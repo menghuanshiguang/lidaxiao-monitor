@@ -49,36 +49,10 @@ jobs:
           restore-keys: |
             lidaxiao-data-
 
-      - name: Clone bilidown CLI
-        run: git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
-
-      - name: Write cookies
-        shell: pwsh
-        env:
-          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
-        run: |
-          New-Item -ItemType Directory -Force data | Out-Null
-          New-Item -ItemType Directory -Force "$env:USERPROFILE\.cache" | Out-Null
-          [IO.File]::WriteAllBytes("data\cookies.txt", [Convert]::FromBase64String($env:COOKIES_B64))
-          Copy-Item "data\cookies.txt" "$env:USERPROFILE\.cache\bilibili-login-cookies.txt" -Force
-
-      - name: Fetch video + extract frames (cache miss fallback)
-        shell: bash
-        run: |
-          if [ ! -d data/frames/BV1x3y8zpEGD ]; then
-            mkdir -p data/frames/BV1x3y8zpEGD data/videos
-            python _repo/bin/bilidown.py dl BV1x3y8zpEGD video data/videos mp4 480 1 || true
-            ls -la data/videos
-            ffmpeg -y -v error -i "$(ls data/videos/*.mp4 | head -1)" \
-              -vf "fps=1/2.18" -q:v 4 data/frames/BV1x3y8zpEGD/f_%06d.jpg
-          fi
-          ls data/frames/BV1x3y8zpEGD | wc -l
-
       - name: Run A/B on same frames
         shell: bash
         run: |
-          ls data/frames || true
-          python bench/ab_same_frames.py --frames data/frames --bvid BV1x3y8zpEGD \
+          python bench/ab_same_frames.py --frames bench/frames --bvid BV1x3y8zpEGD \
             --limit ${{ github.event.inputs.limit }} 2>&1 | tee ab.log
 
       - name: Upload log
