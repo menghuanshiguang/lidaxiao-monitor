@@ -56,6 +56,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--xm-input", default="band", choices=["full", "band"])
     ap.add_argument("--ao-input", default="full", choices=["full", "band"])
+    ap.add_argument("--ao-engine", default="raw", choices=["raw", "ocr"],
+                    help="raw=aoyuon.recognize 原生; ocr=我们的 AoyuonOCR 封装(含分行/分块/投票)")
     a = ap.parse_args()
 
     import monitor as M
@@ -78,6 +80,13 @@ def main():
     if not xm.start():
         print("Xiaomi 启动失败, 只能测 Aoyuon")
     rec = Recognizer(threads=4)
+    ao_ocr = None
+    if a.ao_engine == "ocr":
+        from aoyuon_ocr import AoyuonOCR
+        ao_ocr = AoyuonOCR({"threads": 4, "vote": False})
+        if not ao_ocr.start():
+            print("AoyuonOCR 启动失败")
+            return 1
 
     tx, ta, rows = [], [], []
     for i, p in enumerate(frames):
@@ -93,7 +102,10 @@ def main():
         t1 = time.perf_counter()
 
         t2 = time.perf_counter()
-        ab = rec(acrop, is_band=(a.ao_input == "band"))
+        if ao_ocr is not None:
+            ab = ao_ocr(acrop)
+        else:
+            ab = rec(acrop, is_band=(a.ao_input == "band"))
         t3 = time.perf_counter()
 
         xt = " ".join(b[2] for b in xb if b[2]).strip()

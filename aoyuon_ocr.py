@@ -93,6 +93,65 @@ class AoyuonOCR:
         return [(a, b) for a, b in merged]
 
     # ------------------------------------------------------------------ 识别
+
+    # ------------------------------------------------------------------ 超宽行
+    def _ink_cols(self, crop):
+        import cv2
+        g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
+        bg = cv2.blur(g, (15, 15))
+        m = ((g.astype(np.int16) - bg.astype(np.int16)) > 30).astype(np.uint8)
+        return m.sum(axis=0)
+
+    def _split_wide(self, crop, max_px=600, overlap=24):
+        """按高度归一到 48 后的宽度超限时, 在"墨量最少"的列附近切开
+
+        直接压扁会破坏宽高比(实测最长压扁 41%), 尾部字符被吃。
+        切点优先选字间空隙(该列墨量最低), 并保留 overlap 像素重叠,
+        识别后由 _join_parts 去掉接缝处重复的字。
+        """
+        import math
+        h, w = crop.shape[:2]
+        if h <= 0:
+            return [crop]
+        need = w * 48.0 / h
+        if need <= max_px:
+            return [crop]
+        k = max(2, int(math.ceil(need / max_px)))
+        seg = w // k
+        cuts = []
+        ink = self._ink_cols(crop)
+        for i in range(1, k):
+            center = i * seg
+            lo, hi = max(1, center - seg // 4), min(w - 2, center + seg // 4)
+            col = min(range(lo, hi), key=lambda c: ink[c]) if hi > lo else center
+            cuts.append(col)
+        parts, start = [], 0
+        for c in cuts:
+            parts.append(crop[:, max(0, start - (overlap if start else 0)): min(w, c + overlap)])
+            start = c
+        parts.append(crop[:, max(0, start - overlap):])
+        return [p for p in parts if p.shape[1] >= 16]
+
+    @staticmethod
+    def _join_parts(texts):
+        """拼接分块结果, 去掉接缝处重复的字"""
+        out = ""
+        for t in texts:
+            t = (t or "").strip()
+            if not t:
+                continue
+            if not out:
+                out = t
+                continue
+            # 找最长重叠: out 的后缀 == t 的前缀
+            ov = 0
+            for k in range(min(len(out), len(t)), 0, -1):
+                if out[-k:] == t[:k]:
+                    ov = k
+                    break
+            out += t[ov:]
+        return out
+
     def _recognize(self, crop):
         out = self.rec(crop, is_band=True) if self.rec else []
         if not out:
@@ -101,15 +160,27 @@ class AoyuonOCR:
         score = min((o[3] for o in out if o[3]), default=0.0)
         return text, float(score)
 
+    def _recognize_row(self, crop):
+        """单行识别: 超宽先分块, 再拼接"""
+        parts = self._split_wide(crop)
+        if len(parts) == 1:
+            return self._recognize(crop)
+        texts, scores = [], []
+        for p in parts:
+            t, sc = self._recognize(p)
+            texts.append(t)
+            scores.append(sc)
+        return self._join_parts(texts), min(scores) if scores else 0.0
+
     def _recognize_vote(self, img, y0, y1):
         """两次裁切投票: 一致则采信, 不一致则降分"""
         h, w = img.shape[:2]
         a = img[max(0, y0 - self.pad_a):min(h, y1 + self.pad_a)]
         if not self.vote:
-            return self._recognize(a)
+            return self._recognize_row(a)
         b = img[max(0, y0 - self.pad_b):min(h, y1 + self.pad_b)]
-        t1, s1 = self._recognize(a)
-        t2, s2 = self._recognize(b)
+        t1, s1 = self._recognize_row(a)
+        t2, s2 = self._recognize_row(b)
         if t1 == t2:
             return t1, max(s1, s2)
         # 不一致: 取分数高的文本, 但把置信度压到 0.6 以下便于下游标记
