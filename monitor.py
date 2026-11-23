@@ -146,7 +146,7 @@ from lidaxiao.ocr.frames import (  # noqa: E402
     extract_frames, ffprobe_duration, ocr_frame, probe_band_heuristic,
     probe_subtitle_band)
 
-# merge_ts_lines 在 monitor 内已无调用点, 但 batch_subtitles.py:150 用 m.merge_ts_lines,
+# merge_ts_lines 在 monitor 内已无调用点, 但 local/batch_subtitles.py 用 m.merge_ts_lines,
 # 必须继续从 monitor 可见
 from lidaxiao.ocr.pipeline import (  # noqa: E402
     merge_ts_lines, ocr_video)

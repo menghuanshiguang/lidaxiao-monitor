@@ -9,9 +9,9 @@
   - 断点续传: 字幕文件已存在即跳过, 可随时中断重跑
   - 无字幕视频: 写空文件标记, 重跑不重复处理
 用法:
-  python batch_subtitles.py                 # 全量, 2 workers
-  python batch_subtitles.py --workers 3     # 3 workers (内存够时)
-  python batch_subtitles.py --limit 10      # 只处理前10个(测试)
+  python local/batch_subtitles.py           # 全量, 2 workers
+  python local/batch_subtitles.py --workers 3   # 3 workers (内存够时)
+  python local/batch_subtitles.py --limit 10    # 只处理前10个(测试)
 """
 import argparse
 import datetime
@@ -23,7 +23,9 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-WORKDIR = os.path.dirname(os.path.abspath(__file__))
+# 本文件在 local/ 下, 仓库根是它的父目录 (移动前是 dirname(abspath(__file__)), 直接搬会让
+# data/ downloads/ 全指到 local/ 里, 按 WORKDIR 规范上退一层)
+WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if WORKDIR not in sys.path:
     sys.path.insert(0, WORKDIR)
 import monitor as m

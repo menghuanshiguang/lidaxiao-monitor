@@ -8,7 +8,7 @@ fail=0
 if python3 -m pyflakes --version >/dev/null 2>&1; then
   echo "== pyflakes (undefined names) =="
   bad=$(python3 -m pyflakes monitor.py lidaxiao.py aoyuon_ocr.py xiaomi_ocr.py \
-        lidaxiao/ 2>&1 | rg 'undefined name' || true)
+        lidaxiao/ local/ 2>&1 | rg 'undefined name' || true)
   if [ -n "$bad" ]; then
     echo "$bad"
     fail=1
