@@ -25,6 +25,8 @@ class AoyuonOCR:
         self.threads = int(self.conf.get("threads", 4))
         self.pad_a = int(self.conf.get("pad_a", 6))      # 第一遍裁切边距
         self.pad_b = int(self.conf.get("pad_b", 12))     # 第二遍(投票用)
+        self.pad_x = int(self.conf.get("pad_x", 10))     # 与训练裁图一致
+        self.max_px = int(self.conf.get("max_px", 600))  # 超宽阈值(像素, 高度48口径)
         self.vote = bool(self.conf.get("vote", True))
         self.min_gap = int(self.conf.get("min_gap", 2))  # 行间最小空隙(像素)
         self.contrast = int(self.conf.get("contrast", 35))
@@ -102,7 +104,8 @@ class AoyuonOCR:
         m = ((g.astype(np.int16) - bg.astype(np.int16)) > 30).astype(np.uint8)
         return m.sum(axis=0)
 
-    def _split_wide(self, crop, max_px=600, overlap=24):
+    def _split_wide(self, crop, max_px=None, overlap=24):
+        max_px = max_px or self.max_px
         """按高度归一到 48 后的宽度超限时, 在"墨量最少"的列附近切开
 
         直接压扁会破坏宽高比(实测最长压扁 41%), 尾部字符被吃。
@@ -172,6 +175,19 @@ class AoyuonOCR:
             scores.append(sc)
         return self._join_parts(texts), min(scores) if scores else 0.0
 
+    def _recognize_row_vote(self, crop):
+        """单行两次裁切投票 (垂直 pad 0 / +6), 不一致则压低分数"""
+        import cv2
+        t1, s1 = self._recognize_row(crop)
+        if not self.vote:
+            return t1, s1
+        c2 = cv2.copyMakeBorder(crop, 6, 6, 0, 0, cv2.BORDER_REPLICATE)
+        t2, s2 = self._recognize_row(c2)
+        if t1 == t2:
+            return t1, max(s1, s2)
+        best = (t1, s1) if s1 >= s2 else (t2, s2)
+        return best[0], min(best[1], 0.55)
+
     def _recognize_vote(self, img, y0, y1):
         """两次裁切投票: 一致则采信, 不一致则降分"""
         h, w = img.shape[:2]
@@ -188,20 +204,37 @@ class AoyuonOCR:
         return best[0], min(best[1], 0.55)
 
     def __call__(self, img_bgr, is_band=None):
-        """img_bgr: 字幕带(或整帧)。返回 [(y, x, text, score)]"""
+        """img_bgr: 整帧(优先) 或 字幕带。返回 [(y, x, text, score)]
+
+        优先走它自己的 find_line_boxes —— 训练数据就是用这个检测器裁的,
+        换一套切行会让输入分布漂移(实测 CER 从 3% 涨到 4%+)。
+        超宽行(按高度归一后 > max_px)额外分块, 避免被横向压扁。
+        """
         if self.dead or self.rec is None or img_bgr is None:
             return []
         try:
             import cv2
             if img_bgr.ndim == 2:
                 img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
-            h = img_bgr.shape[0]
-            rows = self.split_rows(img_bgr)
+            h, w = img_bgr.shape[:2]
+            boxes = []
+            try:
+                from aoyuon.band import find_line_boxes
+                boxes = find_line_boxes(img_bgr)
+            except Exception as e:
+                self.log(f"⚠ 行检测异常: {e}")
+            if not boxes:                       # 窄带里可能检不出 -> 退到自家行切分
+                for y0, y1 in self.split_rows(img_bgr):
+                    boxes.append((y0, y1, 0, w))
             out = []
-            for y0, y1 in rows:
-                text, score = self._recognize_vote(img_bgr, y0, y1)
+            for (y0, y1, x0, x1) in boxes:
+                crop = img_bgr[max(0, y0 - self.pad_a):min(h, y1 + self.pad_a),
+                               max(0, x0 - self.pad_x):min(w, x1 + self.pad_x)]
+                if crop.size == 0:
+                    continue
+                text, score = self._recognize_row_vote(crop)
                 if text:
-                    out.append((float(y0), 0.0, text, score))
+                    out.append((float(y0), float(x0), text, score))
             return out
         except Exception as e:
             self.log(f"⚠ Aoyuon-OCR 识别异常: {e}")
