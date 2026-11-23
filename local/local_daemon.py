@@ -26,7 +26,8 @@ import time
 
 import requests
 
-WORKDIR = os.path.dirname(os.path.abspath(__file__))
+# 本文件在 local/ 下, 仓库根是父目录 (原为 dirname(abspath(__file__)), 直接搬会指到 local/)
+WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CN_TZ = datetime.timezone(datetime.timedelta(hours=8))
 UTC = datetime.timezone.utc
 REPO = "menghuanshiguang/lidaxiao-monitor"

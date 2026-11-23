@@ -9,7 +9,7 @@ import time
 import pystray
 from PIL import Image, ImageDraw
 
-import local_daemon as daemon
+from local import local_daemon as daemon
 
 STOP = threading.Event()
 

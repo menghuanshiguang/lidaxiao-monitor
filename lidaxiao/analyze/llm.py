@@ -226,7 +226,7 @@ def _apply_thinking(payload, pcfg):
 def _call_llm_once(pcfg, api_key, system, user):
     """向单个 LLM provider 发起一次 Chat Completions 请求"""
     if pcfg.get("mode") == "json":
-        import local_render
+        from local import local_render
         return local_render.run(pcfg, user)
     if pcfg.get("provider") == "ollama":
         return _call_ollama_native(pcfg, system, user)

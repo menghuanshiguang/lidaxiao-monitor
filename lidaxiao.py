@@ -10,7 +10,7 @@ import argparse
 import os
 import sys
 
-import local_daemon as ld
+from local import local_daemon as ld
 
 
 def is_cloud():
