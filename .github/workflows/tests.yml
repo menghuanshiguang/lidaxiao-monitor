@@ -22,7 +22,7 @@ jobs:
       - name: 安装单测依赖 (pyflakes / numpy / pillow)
         run: |
           python3 -m pip install --upgrade pip
-          python3 -m pip install pyflakes numpy pillow
+          python3 -m pip install pyflakes numpy pillow opencv-python-headless
 
       - name: 安装 ripgrep (run_all.sh 用 rg 过滤 undefined name)
         run: |
