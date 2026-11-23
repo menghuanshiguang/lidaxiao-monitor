@@ -82,8 +82,7 @@ except Exception:
 
 
 from textutil import (  # noqa: E402
-    CLEAN_RE, TS_RE, WM_RE, filter_ocr_text, log, norm_text,
-    read_text, write_text)
+    filter_ocr_text, log, norm_text, read_text, write_text)
 
 
 # =====================================================================
@@ -808,37 +807,6 @@ def probe_band_heuristic(frames, samples=8, min_h=0.18):
         y0 = max(0.0, y1 - min_h)
     band = (round(y0, 3), round(y1, 3))
     log(f"字幕带探测: 行投影 {len(idx)} 帧 -> ({band[0]:.2f},{band[1]:.2f})")
-    return band
-
-
-def detect_band(engine, frames, conf, default=(0.55, 1.0), samples=5):
-    """用模型在若干整帧上找字幕真实位置
-
-    每条视频的字幕位置都可能不同(底部/偏上/居中), 写死带子要么漏字幕要么算半屏。
-    这里抽 5 帧整帧 OCR, 取文字行 y 的分位区间, 失败就回退默认带。
-    """
-    n = len(frames)
-    idx = sorted({int(n * k / samples) for k in range(samples)} | {n // 2})
-    idx = [i for i in idx if 0 <= i < n][:samples + 1]
-    from PIL import Image
-    with Image.open(frames[0]) as im:
-        w, h = im.size
-    ys = []
-    for i in idx:
-        try:
-            for y, x, text, score in ocr_frame(engine, frames[i], None):
-                # 排除顶部 logo 和右上角日期水印
-                if score >= conf and filter_ocr_text(text, conf) \
-                        and 0.03 * w <= x <= 0.97 * w and y > 0.05 * h:
-                    ys.append(y)
-        except Exception as e:
-            log(f"⚠ 字幕带探测取样失败(帧{i}): {e}")
-    if not ys:
-        log(f"字幕带探测: 无文字行, 用默认 {default}")
-        return default
-    band = band_from_points(ys, h, default)
-    log(f"字幕带探测: {len(ys)} 行文字 -> ({band[0]:.2f},{band[1]:.2f}) "
-        f"[样本帧 {len(idx)}]")
     return band
 
 
