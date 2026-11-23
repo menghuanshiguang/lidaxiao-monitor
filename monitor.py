@@ -199,7 +199,9 @@ from lidaxiao.vision.ending import read_ending_hint  # noqa: E402
 
 from lidaxiao.analyze.llm import (  # noqa: E402
     _apply_thinking, _warn_model, analyze_subtitles, build_dsc_prompt, call_llm,
-    check_vision, load_history, tighten_analysis, validate_report)
+    load_history, tighten_analysis, validate_report)
+# check_vision 随视觉通道搬去 vision/, analyze 不再导出它
+from lidaxiao.vision import check_vision  # noqa: E402
 
 
 # =====================================================================

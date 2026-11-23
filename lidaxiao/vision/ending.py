@@ -18,11 +18,7 @@ from lidaxiao.prompts import ENDING_PROMPT, ENDING_PROMPT_VER
 from lidaxiao.textutil import log, read_text, write_text
 
 
-# 过渡依赖 (P3 阶段裁定): 视觉通道 vision_providers / _call_vision_once / _call_dsv /
-# VISION_CLI_PROVIDER 仍在 analyze/llm.py, 交接文档 §4 把这些写成"后续合并"的工作, 本轮不做。
-# 所以 vision -> analyze 是一条临时反向边: 硬约束是 analyze 不得反向 import vision,
-# vision 不得 import sources/report/monitor。视觉通道搬进本包后删除这一段并单开 commit。
-from lidaxiao.analyze.llm import (  # noqa: E402
+from lidaxiao.vision.channel import (  # noqa: E402
     VISION_CLI_PROVIDER, _call_dsv, _call_vision_once, vision_providers)
 
 
