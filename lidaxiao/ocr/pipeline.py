@@ -79,7 +79,7 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
         seq = [(i, i) for i in idx_list]
         if dedup_on and len(idx_list) > 1:
             try:
-                import frame_dedup as _fd
+                from lidaxiao.ocr import dedup as _fd
                 sigs = [_fd.band_sig(frames[i], band) for i in idx_list]
                 seq = _fd.pick_indices(sigs)
                 stats["ocr_calls"] = stats.get("ocr_calls", 0) + len(seq)
