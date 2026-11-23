@@ -523,6 +523,19 @@ def _direct_download(bvid):
         r = s.get(url, headers={"Range": "bytes=0-"}, stream=True, timeout=60)
         r.raise_for_status()
         total = int(r.headers.get("Content-Length") or 0)
+        # 206 部分内容: 必须确认 Range 覆盖了整个文件, 否则会把半截视频当成功
+        expect = total
+        if r.status_code == 206:
+            crange = (r.headers.get("Content-Range") or "").strip()
+            m_range = re.fullmatch(r"bytes\s+0-(\d+)/(\d+)", crange)
+            if not m_range:
+                log(f"兜底下载: 206 但 Content-Range 异常 ({crange!r}), 丢弃")
+                return None
+            end, full = int(m_range.group(1)), int(m_range.group(2))
+            if end + 1 != full:
+                log(f"兜底下载: 只覆盖 {end + 1}/{full}B, 丢弃")
+                return None
+            expect = full
         with open(tmp, "wb") as f:
             for chunk in r.iter_content(1 << 20):
                 if chunk:
@@ -532,12 +545,17 @@ def _direct_download(bvid):
             os.remove(tmp)
             log(f"兜底下载: 文件过小 {size}B, 丢弃")
             return None
+        if expect and size != expect:
+            os.remove(tmp)
+            log(f"兜底下载: 长度不符 {size}/{expect}B, 丢弃")
+            return None
         os.replace(tmp, dest)
         log(f"✅ 兜底下载完成(Range): {dest} {size/1048576:.1f}MB"
             + (f" / {total/1048576:.1f}MB" if total else ""))
         return dest
     except Exception as e:
-        log(f"兜底下载失败: {type(e).__name__}: {e}")
+        msg = re.sub(r"https?://\S+", "[URL]", str(e))
+        log(f"兜底下载失败: {type(e).__name__}: {msg}")
         return None
 
 
