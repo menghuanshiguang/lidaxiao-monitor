@@ -187,6 +187,7 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 | **`reports/` 与 `state/`** | 由 bot 自动推送，不手工改。`state/` 入库并随仓库同步，是两个运行通道互不重复分析的基础 |
 | **`data/` 与 `reports/` 克隆后不存在** | 运行时目录，程序自己建，`.gitignore` 忽略。README 目录树里列它们是提示用途，不是「缺文件」 |
 | **`__pycache__`** | 已忽略；根目录出现它不算违规 |
+| **「拿已发布产物」验不出这个 bug** | 免责声明重复追加的复现：落盘的 `.md` 里已经含有 `ensure_disclaimer` 追加的半角那份，`DISCLAIMER in text` 精确匹配会命中，旧逻辑看起来也「不追加」——于是验出「没病」。要复现必须先把模型原文复原（删掉追加的那行半角声明）再喂旧逻辑，才会得到 2 处；`baseline-reports/2026-11-23.md` 的 `L52` 是模型写的全角、`L64` 才是追加的半角。凡是「看着能验、其实验不出」的场景，第一件事是问清输入是模型原文还是落盘产物 |
 | **libgit2 的路径限定 git 命令** | 本仓库当前 git 实现下 `git log/diff <rev> -- <path>` 会静默返回空，见第 3 节 |
 | **`: > file` 与 chmod** | 本机沙箱只能跑 Python 子进程，`chmod +x` 不生效、外部二进制 spawn 不出来；依赖这类手段的验证要在 CI 上做 |
 
