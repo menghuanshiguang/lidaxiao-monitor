@@ -100,6 +100,8 @@
 
 ```bash
 # Python 3.12+ / Git / ffmpeg (放入 tools/ffmpeg/bin/ 或加入 PATH)
+
+> 接手项目先读 [交接文档](docs/HANDOVER.md)（架构 / 运行 / 已知问题 / 约定）。
 pip install -r requirements.txt
 git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ```
