@@ -64,7 +64,7 @@
         │  互斥靠 gh variable LOCAL_DAEMON_CLAIMED_AT (认领标志)
         │             ┌─────────────────────────────────────────┐
         └─────────────┤  🖥️ 本地守护 (14:39 / 19:59, 早1分钟)     │
-   local_daemon.py /   │  ① 云端已有今日报告?云端正在跑? → 跳过   │
+ local/local_daemon.py │  ① 云端已有今日报告?云端正在跑? → 跳过   │
    托盘版 / 计划任务     │  ② 否则: 写认领标志 → git pull 同步状态   │
                        │  ③ LIDAXIAO_LOCAL=1 跑 monitor (Ollama) │
                        │  ④ 报告+状态 git push [skip ci]          │
@@ -130,9 +130,9 @@ python monitor.py                  # 直接跑核心流水线 (无新视频秒�
 python monitor.py --check-vision   # 自检片尾视觉通道 (不下载不分析)
 ```
 
-> 💻 **Windows 懒人包**:`run_monitor.cmd`(计划任务/手动包装,日志进 `data\run.log`)· `start_local_daemon.cmd`(本地守护,Ollama 环境已预设)· `local_daemon_tray.py`(**托盘版**:右下角常驻,菜单 立即运行/查看日志/退出)
+> 💻 **Windows 懒人包**:`run_monitor.cmd`(计划任务/手动包装,日志进 `data\run.log`)· `start_local_daemon.cmd`(本地守护,Ollama 环境已预设)· `local/local_daemon_tray.py`(**托盘版**:右下角常驻,菜单 立即运行/查看日志/退出)
 >
-> 💡 **更多用法**:批量补全历史字幕 `python batch_subtitles.py` · 发布规律分析 `python _setup/analyze_pubtimes.py` · 本地计划任务 `powershell -File _setup/install_schedule.ps1`(科学化 7 次/天)· 失败重跑 `python _setup/reset_failed_state.py`
+> 💡 **更多用法**:批量补全历史字幕 `python local/batch_subtitles.py` · 发布规律分析 `python _setup/analyze_pubtimes.py` · 本地计划任务 `powershell -File _setup/install_schedule.ps1`(科学化 7 次/天)· 失败重跑 `python _setup/reset_failed_state.py`
 
 ---
 
@@ -161,7 +161,7 @@ gh secret set OPENCODE_GO_API_KEY --repo <your>/lidaxiao-monitor   # 可选
 ### 本地: 守护进程与云端无缝错峰
 
 ```bash
-python lidaxiao.py --daemon        # 或 python local_daemon.py / local_daemon_tray.py
+python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/local_daemon_tray.py
 ```
 
 - **时间错峰**:本地 14:39/19:59,比云端早 1 分钟;错过 slot 60 分钟内仍补跑
@@ -208,33 +208,52 @@ python lidaxiao.py --daemon        # 或 python local_daemon.py / local_daemon_t
 
 ```
 ├── lidaxiao.py              # ⭐ 统一入口 (--once 云端/本地自适应, --daemon 本地守护)
-├── monitor.py               # 核心流水线 (检测/下载/OCR/片尾视觉/AI分析/报告)
-├── local_daemon.py          # 本地常驻定时 + 认领标志互斥 + 报告发布
-├── local_daemon_tray.py     # 托盘版 (pystray: 立即运行/查看日志/退出)
-├── batch_subtitles.py       # 批量字幕提取 (全量历史, 多进程断点续传)
+├── monitor.py               # 编排 + 入口: 只剩 main / process_video (464 行)
 ├── config.json              # 配置 (UID/OCR/LLM五级通道/片尾视觉)
 ├── requirements.txt         # Python 依赖
-├── run_monitor.cmd          # Windows 计划任务包装 (日志 → data\run.log)
-├── start_local_daemon.cmd   # Windows 本地守护启动 (Ollama 环境预设)
-├── agent_task.md            # 项目最初的任务书 (需求与验收标准)
-├── 发布规律分析.md           # 400 条发布样本统计 → 定时方案依据
-├── _setup/
-│   ├── login_wait.py        # B站扫码登录
-│   ├── install_schedule.ps1 # 本地计划任务安装 (科学化 7 次/天)
-│   ├── fetch_pubdates.py    # 拉取UP主历史发布时间
-│   ├── analyze_pubtimes.py  # 发布规律分析
-│   ├── weekly_summary.py    # 周度总结生成
-│   ├── week_process.py      # 指定日期段补处理 (周报/补全)
-│   ├── reset_failed_state.py# 清失败状态, 让下次 Actions 自动重跑
-│   └── chat_ollama.py       # Ollama 交互调试客户端
+├── aoyuon_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/aoyuon.py
+├── xiaomi_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/xiaomi.py
+│
+├── lidaxiao/                # 核心包: 依赖单向, common → ... → report → monitor
+│   ├── common.py            # 路径 / 时区 / ffmpeg 定位
+│   ├── config.py            # 配置读取与密钥加载
+│   ├── textutil.py          # 日志 / 读写 / 归一化 / 水印过滤
+│   ├── prompts.py           # 提示词与报告结构常量
+│   ├── audit.py             # 审计整改的确定性修复 (纯函数)
+│   ├── ocr/
+│   │   ├── frames.py        # 抽帧 / 单帧 OCR / 字幕带探测
+│   │   ├── pipeline.py      # 引擎选择与回退 / 逐帧扫描 / 帧去重
+│   │   ├── engine.py        # RapidOCR 单例 (DirectML 优先)
+│   │   ├── dedup.py         # 帧签名与游程压缩
+│   │   └── engines/         # aoyuon.py (本地权重) · xiaomi.py (llama-server)
+│   ├── sources/
+│   │   └── bilibili.py      # API / 更新检测 / 下载 (Range 兜底)
+│   ├── analyze/
+│   │   └── llm.py           # LLM 调用 / CLI 通道 / 结果整形
+│   ├── vision/
+│   │   └── ending.py        # 片尾抽帧 + 视觉识别 + 缓存
+│   ├── report/
+│   │   └── render.py        # 渲染 / 合并 / 后处理
+│   └── runtime/
+│       └── state.py         # processed.txt + 并发锁
+│
+├── local/                   # 本地侧 (云端链路不 import)
+│   ├── local_daemon.py      # 常驻定时 + 认领标志互斥 + 报告发布
+│   ├── local_daemon_tray.py # 托盘版 (pystray)
+│   ├── local_render.py      # 本地 Ollama 渲染通道
+│   └── batch_subtitles.py   # 批量字幕提取 (多进程断点续传)
+│
+├── _setup/                  # 一次性/运维脚本 (登录、计划任务、周报、补处理)
+├── tests/                   # 纯函数单测 + run_all.sh (三件套之一)
+├── bench/                   # A/B 与帧样本
+├── docs/                    # 交接文档 + docs/reports/ 日报 (自动发布)
+├── _archive/workflows/      # 归档的 12 个实验性 workflow
 ├── skills/daxiao-strategy/  # 🧠 策略研判 skill (报告 → 定性 → 逐仓操作)
-├── docs/reports/            # 日报 (自动发布): index.md / latest.md / weekly.md
+├── scripts/ · aoyuon/       # 辅助脚本 · vendor 上游模型代码与权重 (勿改)
 ├── state/                   # 共享状态 (入库): last_bvid / processed / 片尾缓存
-├── data/                    # 运行时 (不入库): 视频/帧/日志/锁
-└── reports/                 # 本地日报 (不入库, 发布时按BV合并进 docs/reports)
+├── data/                    # 运行时 (不入库): 视频 / 帧 / 日志 / 锁
+└── reports/                 # 本地日报 (不入库, 发布时按 BV 合并进 docs/reports)
 ```
-
----
 
 ## 🧠 配套 Skill: daxiao-strategy
 
