@@ -1,0 +1,42 @@
+name: tests
+
+# 「Actions 全绿」这条门禁的载体: 只跑单测与静态检查, 不碰任何业务链路。
+# 之前仓库里没有任何 workflow 跑 tests/run_all.sh, 门禁是空的, 这个文件把它补上。
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装单测依赖 (pyflakes / numpy / pillow)
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyflakes numpy pillow
+
+      - name: 安装 ripgrep (run_all.sh 用 rg 过滤 undefined name)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
+      # 两个前置断言: 堵死 run_all.sh 的两条静默通过路径
+      #   1) pyflakes 未安装时 run_all.sh 会打印「跳过」并算通过
+      #   2) rg 不存在时 `| rg 'undefined name'` 返回空, 也会被当成通过
+      - name: 前置断言: pyflakes 必须可用
+        run: python3 -m pyflakes --version
+
+      - name: 前置断言: ripgrep 必须可用
+        run: command -v rg
+
+      - name: 单测 + 静态检查 (tests/run_all.sh)
+        run: bash tests/run_all.sh
