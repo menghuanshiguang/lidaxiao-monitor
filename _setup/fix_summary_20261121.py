@@ -1,7 +1,7 @@
 import re, sys, shutil, os
 sys.path.insert(0, '/var/minis/workspace/lidaxiao-monitor')
 os.chdir('/var/minis/workspace/lidaxiao-monitor')
-import audit_p2 as A
+from lidaxiao import audit as A
 
 p = 'docs/reports/2026-11-21.md'
 text = open(p, encoding='utf-8').read()

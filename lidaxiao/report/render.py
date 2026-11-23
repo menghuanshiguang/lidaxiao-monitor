@@ -8,7 +8,7 @@ from lidaxiao.common import CN_TZ, DISCLAIMER, WORKDIR
 from lidaxiao.textutil import log, read_text, write_text
 
 try:
-    import audit_p2 as _audit
+    from lidaxiao import audit as _audit
 except Exception:            # 模块缺失时退化为无审计
     _audit = None
 

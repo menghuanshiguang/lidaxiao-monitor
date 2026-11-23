@@ -7,7 +7,7 @@ fail=0
 # 1) 静态检查: 只卡"未定义名"这一类运行时才会炸的错误
 if python3 -m pyflakes --version >/dev/null 2>&1; then
   echo "== pyflakes (undefined names) =="
-  bad=$(python3 -m pyflakes monitor.py lidaxiao.py aoyuon_ocr.py xiaomi_ocr.py audit_p2.py frame_dedup.py \
+  bad=$(python3 -m pyflakes monitor.py lidaxiao.py aoyuon_ocr.py xiaomi_ocr.py \
         lidaxiao/ 2>&1 | rg 'undefined name' || true)
   if [ -n "$bad" ]; then
     echo "$bad"

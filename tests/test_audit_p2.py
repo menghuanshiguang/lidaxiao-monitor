@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # -*- coding: utf-8 -*-
 """本地单测: 不联网, 全部纯函数。"""
-import audit_p2 as A
+from lidaxiao import audit as A
 
 ok = fail = 0
 

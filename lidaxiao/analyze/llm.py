@@ -96,7 +96,7 @@ def _call_vision_once(pcfg, api_key, prompt, images):
     return text
 
 try:
-    import audit_p2 as _audit
+    from lidaxiao import audit as _audit
 except Exception:
     _audit = None
 

@@ -41,7 +41,7 @@ from lidaxiao.common import (  # noqa: E402
     CN_TZ, DISCLAIMER, STATE_DIR, WORKDIR)
 
 try:
-    import audit_p2 as _audit
+    from lidaxiao import audit as _audit
 except Exception:  # pragma: no cover - 模块缺失时不影响主流程
     _audit = None
 # bash 路径可用环境变量 BILIDOWN_BASH 覆盖 (如 WSL/GitBash 安装在不同位置)
