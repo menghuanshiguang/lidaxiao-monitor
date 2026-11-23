@@ -24,17 +24,9 @@
 退出码: 0=正常(含无更新)  1=出错
 """
 import argparse
-import base64
-import datetime
-import hashlib
-import io
 import os
-import re
-import shutil
 import sys
 import time
-import urllib.parse
-import urllib.request
 
 # ---------- 常量 ----------
 # 原来这里有两处重复的 common import (第 40 行与第 50 行), 合并成一处。
@@ -270,7 +262,8 @@ from lidaxiao.analyze.llm import (  # noqa: E402
 # 5. 每日报告
 # =====================================================================
 from lidaxiao.report.render import (  # noqa: E402
-    build_section, ensure_disclaimer, postprocess_analysis, upsert_report)
+    build_section, ensure_disclaimer, list_line, postprocess_analysis,
+    upsert_report)
 
 
 
@@ -358,9 +351,6 @@ def process_video(cfg, api_key, video):
     return (True, rp, "ok")
 
 
-def list_line(video):
-    t = datetime.datetime.fromtimestamp(video.get("pubdate", time.time()), CN_TZ)
-    return f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
 
 
 

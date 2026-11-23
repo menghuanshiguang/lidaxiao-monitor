@@ -231,3 +231,8 @@ def ending_md(rec):
         out.append("")
     out.append("\n".join(rest))
     return "\n".join(out) + "\n"
+
+
+def list_line(video):
+    t = datetime.datetime.fromtimestamp(video.get("pubdate", time.time()), CN_TZ)
+    return f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
