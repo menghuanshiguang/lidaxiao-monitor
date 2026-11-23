@@ -217,7 +217,7 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 ├── run_monitor.cmd          # Windows 计划任务/手动包装 (日志 → data\run.log)
 ├── start_local_daemon.cmd   # Windows 本地守护启动 (Ollama 环境预设)
 ├── lidaxiao.py              # ⭐ 统一入口 (--once 云端/本地自适应, --daemon 本地守护)
-├── monitor.py               # 编排 + 入口: 只剩 main / process_video (466 行)
+├── monitor.py               # 编排 + 入口: 只剩 main / process_video (464 行)
 ├── config.json              # 配置 (UID/OCR/LLM五级通道/片尾视觉)
 ├── aoyuon_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/aoyuon.py
 ├── xiaomi_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/xiaomi.py
@@ -297,16 +297,26 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 | `LOCK_STALE_SECONDS` / `read_state_lines` / `_pid_alive` | `lidaxiao.runtime.state` |
 | `get_ocr` / `_ocr`(单例) / `_ocr_video_impl` / `frame_sig` / `_sig_mad` / `dedupe_frames` | `lidaxiao.ocr.engine` / `lidaxiao.ocr.pipeline` |
 | `tail_frames` / `load_ending_cache` / `save_ending_cache` / `_ending_cache_path` | `lidaxiao.vision.ending` |
-| `vision_providers` / `_call_vision_once` / `_call_dsv` / `VISION_CLI_PROVIDER` | `lidaxiao.analyze.llm` |
+| `vision_providers` / `_call_vision_once` / `_call_dsv` / `VISION_CLI_PROVIDER` | `lidaxiao.vision.channel` |
 | `ENDING_PROMPT_VER` | `lidaxiao.prompts` |
+| `merge_ts_lines` | `lidaxiao.ocr.pipeline` |
+| `ANALYZE_SYSTEM` / `ENDING_PROMPT` / `REPORT_SECTIONS` / `REPORT_TAIL` | `lidaxiao.prompts` |
+| `ffprobe_duration` / `extract_frames` / `ocr_frame` / `probe_band_heuristic` / `probe_subtitle_band` | `lidaxiao.ocr.frames` |
+| `filter_ocr_text` / `norm_text` | `lidaxiao.textutil` |
+| `CN_TZ` / `DISCLAIMER` / `FFMPEG_DIR` / `FFPROBE` | `lidaxiao.common` |
+| `_direct_download` / `expected_duration` / `run_bilidown` | `lidaxiao.sources.bilibili` |
+| `_apply_thinking` / `_warn_model` | `lidaxiao.llmio` |
+| `build_dsc_prompt` / `tighten_analysis` / `validate_report` / `call_llm` | `lidaxiao.analyze.llm` |
 | stdlib 模块名 `base64` / `datetime` / `glob` / `hashlib` / `io` / `json` / `re` / `shutil` / `subprocess` / `urllib` | 已从 `monitor` 移除(拆分后无使用者),需要就自己 import |
 
-**仍然从 `monitor` 可见**(兼容面,`bench/`、`_setup/`、旧脚本在用,共 31 个已实测):
+**仍然从 `monitor` 可见**(兼容面,共 15 个,按 `d59a0b7` 实测):
 `load_config`、`load_llm_key`、`RunLock`、`mark_processed`、`processed_bvids`、`processed_status_map`、
-`is_success_status`、`is_from_baseline`、`read_ending_hint`、`ocr_video`、`merge_ts_lines`、`list_line`、
-`ANALYZE_SYSTEM`、`ENDING_PROMPT`、`REPORT_SECTIONS`、`REPORT_TAIL`、`ffprobe_duration`、`extract_frames`、
-`ocr_frame`、`probe_band_heuristic`、`probe_subtitle_band`、`filter_ocr_text`、`norm_text`、`read_text`、
-`write_text`、`WORKDIR`、`CN_TZ`、`STATE_DIR`、`DISCLAIMER`、`FFMPEG_DIR`、`FFPROBE`。
+`is_success_status`、`is_from_baseline`、`read_ending_hint`、`ocr_video`、`list_line`、`read_text`、
+`write_text`、`WORKDIR`、`STATE_DIR`。
+
+其中 `RunLock` / `mark_processed` / `processed_bvids` 是**故意保留**的:`_setup/week_process.py` 这类
+外部脚本按 `monitor.xxx` 取用,删了就断;其余是本仓库自己的链路在用。`monitor` 自己的编排函数
+(`process_video`、`main`、`analyze_subtitles`、`upsert_report` 等)照常可见,但那是内部实现,不作为对外接口。
 
 ## 🧪 测试与验收口径
 
@@ -330,7 +340,7 @@ bash tests/run_all.sh
 
 判据：**失败集合恒为这 3 个**，passed 数只增不减（拆分收尾时 33 passed；加入 `tests/test_disclaimer.py` 后 47 passed / 3 FAILED）。不许为了让本地变绿去改测试、加 `try/except`、跳过用例。**「本地跑通测试」这句话不成立**，写交付物时别用。
 
-**「全绿」由 `.github/workflows/tests.yml` 承担**：push 即跑 ubuntu-latest + Python 3.12（装了 numpy / pillow / opencv-python-headless / ripgrep）。最近一次绿 run 是 [`45235155031`](https://github.com/menghuanshiguang/lidaxiao-monitor/actions/runs/45235155031)（`0376f75`）；用例数在 ubuntu 上是 53 passed / 0 failed（`a224e65` 那次 run 的日志实测），加新测试后以 run 日志为准。里面两个**前置断言**（`pyflakes --version`、`command -v rg`）别删 —— 缺了它们 `run_all.sh` 有两条静默通过路径。
+**「全绿」由 `.github/workflows/tests.yml` 承担**：push 即跑 ubuntu-latest + Python 3.12（装了 numpy / pillow / opencv-python-headless / ripgrep）。最近一次绿 run 是 [`45235155031`](https://github.com/menghuanshiguang/lidaxiao-monitor/actions/runs/45235155031)（`0376f75`）；用例数在 ubuntu 上是 53 passed / 0 failed（`a224e65` 那次 run 的日志实测）；`tests/test_disclaimer.py` 新增 14 条后应为 **67**（53+14），以那次 run 的日志为准。**本机 47 = 33+14，别拿本机数去对 ubuntu 日志**，两个数不同源。里面两个**前置断言**（`pyflakes --version`、`command -v rg`）别删 —— 缺了它们 `run_all.sh` 有两条静默通过路径。
 
 **业务链路**另用 `monitor.yml` 勾 `force=true` 跑一次，日志里要看到「主扫描完成」「视频处理完成」「报告已提交并推送」，且无 `Traceback`。
 

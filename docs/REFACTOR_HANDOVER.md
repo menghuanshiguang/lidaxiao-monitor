@@ -10,12 +10,12 @@
 
 | 指标 | 拆分前 | 现在 |
 |---|---|---|
-| `monitor.py` | 2,639 行 | **466 行**（−82%） |
-| `monitor.py` 顶层内容 | 下载 / OCR / 片尾识别 / LLM 分析 / 渲染 / 发布全在里面 | 只剩 `process_video`（L284–353）、`main`（L368–462，`add_argument` 5 处在里面）+ `if __name__` |
+| `monitor.py` | 2,639 行 | **464 行**（−82%） |
+| `monitor.py` 顶层内容 | 下载 / OCR / 片尾识别 / LLM 分析 / 渲染 / 发布全在里面 | 只剩 `process_video`（L282–351）、`main`（L366–460，`add_argument` 5 处在里面）+ `if __name__` |
 | 根目录业务 `.py` | 10 个 | **0 个**（只剩 2 个入口 + 2 个 1 行 shim） |
 | 单文件最大 | `monitor.py` 2,639 | `local/local_daemon.py` 712（包内最大 `lidaxiao/analyze/llm.py` 535），全仓 `.py` 无一 ≥ 900 |
 
-> 表内数字是 `2de9fdd` 的实测值。第 10 节第 5 条（`monitor.py` 再导出清理）在本文写作时仍在进行，`monitor.py` 行数会再降，届时以 `git show HEAD:monitor.py` 数换行为准。
+> 表内数字是 `d59a0b7`（代码侧最后一笔）的实测值。其后只有文档提交；行数变了就以 `git show HEAD:<path>` 数换行为准。
 
 拆分原则是**只搬家不改逻辑**：搬家类 commit 里没有一处改行为。已知缺陷单独立项（第 10 节），不混进搬家 commit —— 这条在 P1–P5 每一笔上都核过：函数体逐字节相等，只有 import 与函数外注释跟着改。
 
@@ -50,7 +50,7 @@
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `monitor.py` | 466 | 编排 + 入口 |
+| `monitor.py` | 464 | 编排 + 入口 |
 | `lidaxiao.py` | 69 | 统一入口（`--once` / `--daemon`，自动识别云端/本地） |
 | `aoyuon_ocr.py` / `xiaomi_ocr.py` | 各 1 | **兼容 shim**，只做转发，保证 `from xiaomi_ocr import XiaomiOCR` 仍可用 |
 | `local/local_daemon.py` | 712 | 常驻定时 + 认领标志互斥 + 报告发布 |
@@ -109,6 +109,7 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 | 修正 | `a24505a` | README 补「对外可见变更」一节 |
 | 修正 | `5e6fc15` | `render.py` 免责声明改归一化匹配（全角逗号不再重复追加） |
 | 结构债 | `2de9fdd` | 视觉通道搬进 `vision/channel.py`，共用件下沉 `llmio.py`，消除 `vision → analyze` 反向边 |
+| 结构债 | `d59a0b7` | 撤掉 `monitor` 的 25 条 imported-but-unused 再导出，消费者改直接 import |
 
 > ⚠️ 这个仓库的 `git` 是 libgit2 实现，**路径限定的 `git log`/`git diff` 会静默返回空**（`git log --oneline -- lidaxiao/` 只出 1 笔，实际 20+ 笔）。要按路径回溯，用 `git log --oneline d9ce664..HEAD` 全量列出来人工筛，或 `git show <rev>:<path>` 取内容。
 
@@ -195,7 +196,7 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 
 | # | 条件 | 实测 |
 |---|---|---|
-| 1 | `monitor.py` < 600 行，只剩 `main` / `process_video` / 入口参数解析 | 466 行；顶层 `process_video` L284–353、`main` L368–462（`add_argument` 5 处在 `main` 内）、`if __name__` |
+| 1 | `monitor.py` < 600 行，只剩 `main` / `process_video` / 入口参数解析 | 464 行；顶层 `process_video` L282–351、`main` L366–460（`add_argument` 5 处在 `main` 内）、`if __name__` |
 | 2 | 每个模块 < 900 行 | 全仓 `.py` 最大 `local/local_daemon.py` 712（包内最大 `lidaxiao/analyze/llm.py` 535），无一 ≥ 900 |
 | 3 | 三件套 | `py_compile` 0；`undefined name` 0；本地 47 passed / 3 FAILED（固定那 3 个）；ubuntu 由 `tests.yml` 全绿 |
 | 4 | 连续 3 次 force 线上成功，报告内容与拆分前一致 | run `45232765826` / `45233639404` / `45234161587` 全 success，日志均有「主扫描完成」「视频处理完成」「报告已提交并推送」，无 `Traceback`；差异归因见 5.1 |
@@ -229,7 +230,7 @@ git reset --hard <上一个绿色 commit>      # 一步退回
 
 ## 9. 交接时一起带走
 
-- 更新时 HEAD：`6846783`（随后还有 ④⑤ 两笔结构债，见 `git log -3`）
+- 代码侧最后 HEAD：`d59a0b7`；其后只有文档提交（`git log -5` 可见）
 - 固定测试集：`bench/frames/BV1x3y8zpEGD/`（54 帧，A/B 用）
 - 上游模型仓库：`aoyuon-ocr`（私有），`distill/eval.md` 有完整评测口径
 - 报告对比工具：工作区 `tools/factcheck.py`（`--selftest` 21 项，口径见第 5 节）
@@ -250,10 +251,10 @@ git reset --hard <上一个绿色 commit>      # 一步退回
 ### P1 · 结构债
 
 4. ~~**`vision → analyze` 反向边**~~ **已消除**（`2de9fdd`）：视觉实现搬进 `lidaxiao/vision/channel.py`（242 行），文本与视觉共用的件下沉到 `lidaxiao/llmio.py`（134 行），`analyze/llm.py` 863 → 535 行。复核命令见第 2.3 节。
-5. **`monitor.py` 的 imported-but-unused 再导出**：处理规则按消费者分三类 ——
-   - 仓库内消费者（`batch_subtitles.py`、`bench/`）改成从新模块 import；
-   - `_setup/week_process.py` 用的 `RunLock` / `mark_processed` / `processed_bvids` **必须留在 `monitor`**，那是外部脚本入口，动了就断；
-   - 真没消费者的才删，删前每个名字全仓 grep 并留结果。
+5. ~~**`monitor.py` 的 imported-but-unused 再导出**~~ **已完成**（`d59a0b7`）：`pyflakes monitor.py` 的 imported-but-unused 从 **25 条清到 0**，`monitor.py` 464 行。处理分三类，不是一刀切：
+   - **仓内有消费者，改从新模块 import（12 条）**：`local/batch_subtitles.py`、`bench/run_bench.py`、`bench/legacy/*`、`_setup/weekly_summary.py`、`tests/test_band.py` —— 只换 import 路径，断言与用例数未动；
+   - **必须留在 `monitor`**：`_setup/week_process.py` 用的 `RunLock` / `mark_processed` / `processed_bvids`（外部脚本入口），那个文件零改动；
+   - **全仓无消费者，直接删（13 条）**：换路径见 README「对外可见变更」表。
 
 ### P2 · 卫生
 
