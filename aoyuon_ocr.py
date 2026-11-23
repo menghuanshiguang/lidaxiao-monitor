@@ -204,38 +204,16 @@ class AoyuonOCR:
         return best[0], min(best[1], 0.55)
 
     def __call__(self, img_bgr, is_band=None):
-        """img_bgr: 整帧(优先) 或 字幕带。返回 [(y, x, text, score)]
+        """直接委托给原生 Recognizer。
 
-        优先走它自己的 find_line_boxes —— 训练数据就是用这个检测器裁的,
-        换一套切行会让输入分布漂移(实测 CER 从 3% 涨到 4%+)。
-        超宽行(按高度归一后 > max_px)额外分块, 避免被横向压扁。
+        v0.2 已在内部实现: 整行检测(含邻行兜底)、双行字幕带逐行、超宽分块、
+        尺度归一。我们再做一层切行/投票只会重复劳动(实测质量相同、速度略慢),
+        所以这里只保留接口适配。
         """
         if self.dead or self.rec is None or img_bgr is None:
             return []
         try:
-            import cv2
-            if img_bgr.ndim == 2:
-                img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
-            h, w = img_bgr.shape[:2]
-            boxes = []
-            try:
-                from aoyuon.band import find_line_boxes
-                boxes = find_line_boxes(img_bgr)
-            except Exception as e:
-                self.log(f"⚠ 行检测异常: {e}")
-            if not boxes:                       # 窄带里可能检不出 -> 退到自家行切分
-                for y0, y1 in self.split_rows(img_bgr):
-                    boxes.append((y0, y1, 0, w))
-            out = []
-            for (y0, y1, x0, x1) in boxes:
-                crop = img_bgr[max(0, y0 - self.pad_a):min(h, y1 + self.pad_a),
-                               max(0, x0 - self.pad_x):min(w, x1 + self.pad_x)]
-                if crop.size == 0:
-                    continue
-                text, score = self._recognize_row_vote(crop)
-                if text:
-                    out.append((float(y0), float(x0), text, score))
-            return out
+            return self.rec(img_bgr)
         except Exception as e:
             self.log(f"⚠ Aoyuon-OCR 识别异常: {e}")
             return []

@@ -998,8 +998,12 @@ def _ocr_video_impl(cfg, video_path, bvid, xm=None):
     # 1) 探测字幕带
     # Xiaomi-OCR: 用配置的固定字幕带(默认下半屏), 既提速又天然避开顶部水印;
     # 未配置时才读整帧。RapidOCR 仍走自适应探测。
+    # aoyuon 用整帧: 它的 find_line_boxes 与训练裁图同源, 自己做行检测
+    if getattr(xm, "name", "") == "aoyuon":
+        band = None
+        log("Aoyuon-OCR: 整帧输入(由其自带检测器分行)")
     xcfg = cfg.get("xiaomi_ocr") or {}
-    xband = xcfg.get("band") if xm is not None else None
+    xband = xcfg.get("band") if xm is not None and getattr(xm, "name", "") != "aoyuon" else None
     if xm is not None:
         if xband in (None, "auto", "AUTO") or (
                 isinstance(xband, (list, tuple)) and xband and str(xband[0]).lower() == "auto"):

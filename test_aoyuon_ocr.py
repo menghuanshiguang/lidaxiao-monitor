@@ -57,31 +57,29 @@ chk("两行 -> 2 段", len(rows2) == 2, rows2)
 chk("两行位置合理", len(rows2) == 2 and rows2[0][0] < rows2[1][0], rows2)
 chk("空图 -> 空", eng.split_rows(np.zeros((0, 0, 3), np.uint8)) == [])
 
-print("投票")
-eng2 = A.AoyuonOCR({"vote": True, "pad_a": 6, "pad_b": 12})
-eng2.rec = FakeRec(lambda h: "一致文本")          # 两次都一样
-res = eng2(make_band(lines=1))
-chk("两次一致 -> 采信", len(res) == 1 and res[0][2] == "一致文本", res)
-chk("分数保留", len(res) == 1 and res[0][3] > 0.8, res)
+print("委托给原生 Recognizer")
+class Delegating:
+    provides_boxes = True
+    def __init__(self):
+        self.seen = 0
+    def __call__(self, img, is_band=None):
+        self.seen += 1
+        return [(10.0, 20.0, "识别结果", 0.93), (40.0, 20.0, "第二行", 0.91)]
 
-eng3 = A.AoyuonOCR({"vote": True, "pad_a": 6, "pad_b": 12})
-_state = {"n": 0}
+eng2 = A.AoyuonOCR()
+eng2.rec = Delegating()
+res = eng2(make_band(lines=2))
+chk("原样透传结果", res == [(10.0, 20.0, "识别结果", 0.93), (40.0, 20.0, "第二行", 0.91)], res)
+chk("确实调用了原生", eng2.rec.seen == 1, eng2.rec.seen)
 
+class Boom:
+    provides_boxes = True
+    def __call__(self, img, is_band=None):
+        raise RuntimeError("模型炸了")
 
-def _flaky(h):
-    _state["n"] += 1
-    return "甲" if _state["n"] % 2 == 1 else "乙"
-
-
-eng3.rec = FakeRec(_flaky)
-res3 = eng3(make_band(lines=1))
-chk("两次不一致 -> 降分", len(res3) == 1 and res3[0][3] <= 0.55, res3)
-
-print("两行分别识别")
-eng4 = A.AoyuonOCR({"vote": False})
-eng4.rec = FakeRec(lambda h: "行文本")
-res4 = eng4(make_band(lines=2))
-chk("两行都出结果", len(res4) == 2, res4)
+eng3 = A.AoyuonOCR()
+eng3.rec = Boom()
+chk("异常时返回空而不抛", eng3(make_band()) == [])
 
 print("未初始化保护")
 eng5 = A.AoyuonOCR()

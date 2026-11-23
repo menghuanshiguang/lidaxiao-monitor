@@ -80,7 +80,7 @@
     "max_tokens": 6000,
     "timeout": 240
   },
-  "ocr_engine": "xiaomi",
+  "ocr_engine": "aoyuon",
   "xiaomi_ocr": {
     "server_bin": "llama/llama-server.exe",
     "model": "llama/xiaomi-ocr-0-q4km.gguf",
