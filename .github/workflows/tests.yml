@@ -32,10 +32,10 @@ jobs:
       # 两个前置断言: 堵死 run_all.sh 的两条静默通过路径
       #   1) pyflakes 未安装时 run_all.sh 会打印「跳过」并算通过
       #   2) rg 不存在时 `| rg 'undefined name'` 返回空, 也会被当成通过
-      - name: 前置断言: pyflakes 必须可用
+      - name: "前置断言: pyflakes 必须可用"
         run: python3 -m pyflakes --version
 
-      - name: 前置断言: ripgrep 必须可用
+      - name: "前置断言: ripgrep 必须可用"
         run: command -v rg
 
       - name: 单测 + 静态检查 (tests/run_all.sh)
