@@ -12,9 +12,9 @@ import subprocess
 import sys
 import time
 
-from common import CN_TZ, WORKDIR
-from prompts import ANALYZE_SYSTEM, REPORT_SECTIONS, REPORT_TAIL
-from textutil import log, read_text
+from lidaxiao.common import CN_TZ, WORKDIR
+from lidaxiao.prompts import ANALYZE_SYSTEM, REPORT_SECTIONS, REPORT_TAIL
+from lidaxiao.textutil import log, read_text
 
 LLM_PROVIDER_KEY_ENVS = {
     "opencode-go": ("OPENCODE_GO_API_KEY",),

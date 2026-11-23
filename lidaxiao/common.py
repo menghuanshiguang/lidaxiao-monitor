@@ -3,7 +3,8 @@ import datetime
 import os
 import shutil
 
-WORKDIR = os.path.dirname(os.path.abspath(__file__))
+# 包在 lidaxiao/ 下, 仓库根是它的父目录
+WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_DIR = os.path.join(WORKDIR, "state")
 CN_TZ = datetime.timezone(datetime.timedelta(hours=8))
 DISCLAIMER = "以上为李大霄个人观点提炼,不构成投资建议"

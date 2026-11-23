@@ -9,9 +9,9 @@ import time
 import urllib.parse
 import urllib.request
 
-from common import FFMPEG_DIR, WORKDIR
-from ocr import ffprobe_duration
-from textutil import log, read_text
+from lidaxiao.common import FFMPEG_DIR, WORKDIR
+from lidaxiao.ocr.frames import ffprobe_duration
+from lidaxiao.textutil import log, read_text
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")

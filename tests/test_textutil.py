@@ -4,7 +4,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import textutil as T
+from lidaxiao import textutil as T
 
 ok = fail = 0
 

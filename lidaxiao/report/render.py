@@ -4,8 +4,8 @@ import os
 import re
 import time
 
-from common import CN_TZ, DISCLAIMER, WORKDIR
-from textutil import log, read_text, write_text
+from lidaxiao.common import CN_TZ, DISCLAIMER, WORKDIR
+from lidaxiao.textutil import log, read_text, write_text
 
 try:
     import audit_p2 as _audit

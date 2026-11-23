@@ -40,7 +40,7 @@ import urllib.parse
 import urllib.request
 
 # ---------- 常量 ----------
-from common import (  # noqa: E402
+from lidaxiao.common import (  # noqa: E402
     CN_TZ, DISCLAIMER, STATE_DIR, WORKDIR)
 
 try:
@@ -50,7 +50,7 @@ except Exception:  # pragma: no cover - 模块缺失时不影响主流程
 # bash 路径可用环境变量 BILIDOWN_BASH 覆盖 (如 WSL/GitBash 安装在不同位置)
 BASH = os.environ.get("BILIDOWN_BASH", r"D:\Program Files\Git\bin\bash.exe")
 BILIDOWN_SCRIPT = os.path.join(WORKDIR, "_repo", "bin", "bilidown")
-from common import (  # noqa: E402
+from lidaxiao.common import (  # noqa: E402
     CN_TZ, FFMPEG, FFMPEG_DIR, FFPROBE, STATE_DIR, WORKDIR)
 
 
@@ -66,7 +66,7 @@ except Exception:
     pass
 
 
-from textutil import (  # noqa: E402
+from lidaxiao.textutil import (  # noqa: E402
     filter_ocr_text, log, norm_text, read_text, write_text)
 
 
@@ -293,7 +293,7 @@ class RunLock:
 
 
 # ---------------- bilidown 调用 ----------------
-from sources import (  # noqa: E402
+from lidaxiao.sources.bilibili import (  # noqa: E402
     _direct_download, download_video, ensure_complete_download, expected_duration,
     fetch_video_info, find_downloaded_mp4, get_space_videos, run_bilidown)
 
@@ -347,7 +347,7 @@ def get_ocr():
     return _ocr
 
 
-from ocr import (  # noqa: E402
+from lidaxiao.ocr.frames import (  # noqa: E402
     extract_frames, ffprobe_duration, ocr_frame, probe_band_heuristic,
     probe_subtitle_band)
 
@@ -543,7 +543,7 @@ def merge_ts_lines(a, b):
 #     李大霄视频片尾固定是"卡片区": 口播结束语 + 荐书卡 + 合规声明卡(+偶尔数据面板),
 #     这类整屏密集文字会被 OCR 的字数/数字过滤规则丢弃, 因此单独用视觉模型读片尾。
 # =====================================================================
-from prompts import (ANALYZE_SYSTEM, ENDING_PROMPT, ENDING_PROMPT_VER, REPORT_SECTIONS, REPORT_TAIL)  # noqa: E402
+from lidaxiao.prompts import (ANALYZE_SYSTEM, ENDING_PROMPT, ENDING_PROMPT_VER, REPORT_SECTIONS, REPORT_TAIL)  # noqa: E402
 
 
 def _ending_cache_path():
@@ -725,7 +725,7 @@ def read_ending_hint(cfg, video, video_path=None, force=False):
     return None
 
 
-from analyze import (  # noqa: E402
+from lidaxiao.analyze.llm import (  # noqa: E402
     VISION_CLI_PROVIDER, _apply_thinking, _call_dsv, _call_vision_once,
     _warn_model, analyze_subtitles, build_dsc_prompt, call_llm, check_vision,
     load_deepseek_key, load_history, load_llm_key, tighten_analysis,
@@ -791,7 +791,7 @@ from analyze import (  # noqa: E402
 # =====================================================================
 # 5. 每日报告
 # =====================================================================
-from report import (  # noqa: E402
+from lidaxiao.report.render import (  # noqa: E402
     build_section, ensure_disclaimer, postprocess_analysis, upsert_report)
 
 

@@ -3,8 +3,8 @@ import glob
 import os
 import subprocess
 
-from common import FFMPEG, FFPROBE, WORKDIR
-from textutil import log
+from lidaxiao.common import FFMPEG, FFPROBE, WORKDIR
+from lidaxiao.textutil import log
 
 
 def extract_frames(video_path, bvid, interval):
