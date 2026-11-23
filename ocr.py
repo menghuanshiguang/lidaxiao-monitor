@@ -3,7 +3,7 @@ import glob
 import os
 import subprocess
 
-from common import FFMPEG, WORKDIR
+from common import FFMPEG, FFPROBE, WORKDIR
 from textutil import log
 
 
@@ -144,3 +144,13 @@ def probe_band_heuristic(frames, samples=8, min_h=0.18):
     band = (round(y0, 3), round(y1, 3))
     log(f"字幕带探测: 行投影 {len(idx)} 帧 -> ({band[0]:.2f},{band[1]:.2f})")
     return band
+
+
+def ffprobe_duration(video_path):
+    try:
+        r = subprocess.run([FFPROBE, "-v", "error", "-show_entries",
+                            "format=duration", "-of", "csv=p=0", video_path],
+                           capture_output=True, text=True, timeout=60)
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
