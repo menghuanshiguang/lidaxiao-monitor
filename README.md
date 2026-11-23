@@ -310,3 +310,24 @@ A: 400 条样本统计:日均 3.67 条,高峰 10-15 时(40%)与 18-23 时(43%),�
 <p align="center">
   <b>如果这个项目对你有帮助,点个 ⭐ Star 就是最大的支持!</b>
 </p>
+
+### Windows 本地中文语音归档（试运行）
+
+语音归档和原有 OCR 日报使用各自的状态。Windows 需要 Python 3.12
+及已安装的 BiliPrep（含 yt-dlp、FFmpeg、SenseVoice Small INT8 和 Silero VAD）。
+归档目录须在 Git 工作区外，保存在非系统盘。
+
+```powershell
+python voice_monitor.py --tool-root D:/Tools/BiliPrep --archive D:/LiDaxiaoPrivate --once
+```
+
+首次只验证一个 B站账号条目时追加 `--scan-limit 1`。去掉 `--once` 后启动即查，
+之后每 15 分钟检查，`--interval` 可调整。重启后从持久化队列继续重试，补查
+范围为账号最近 `--scan-limit` 条（默认 30）。归档目录内创建空文件 `pause`
+会暂停下一次检查和下一条转写，移除该文件后恢复，正在处理的项目会先结束。
+`voice.log` 是轮转日志。索引和状态分别在 `index.md`、`latest.md`。
+
+抖音暂只支持使用 `--url` 输入已知视频链接。若平台拒绝访问，会记录失败并退避，
+不会以标题补写讲话。语音转写使用独立子进程，完成后释放资源。完整音轨时长校验
+与片尾待听审状态会随文字稿保存。完整文字稿不进入公开仓库。私有存储同步、
+ChatGPT 读取、字幕优先、实时回环及基于语音的自动研究报告仍需接入。
