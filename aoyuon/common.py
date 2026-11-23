@@ -55,13 +55,17 @@ def preprocess(crop_bgr, height=IMG_H, max_width=MAX_W, to_float=True):
     return g
 
 
-def ctc_greedy(logits, charset, blank=BLANK, score_mode="mean"):
+def ctc_greedy(logits, charset, blank=BLANK, score_mode="mean", return_chars=False):
     """logits: (T, C) 或 (C, T) 的 log-probs 或 probs; 返回 (text, score)。
 
     score_mode 决定整行置信度的算法 (issue #8 实测: geo 的可分性最好):
       mean : 逐字最大概率的均值 (历史默认)
       min  : 逐字最大概率的最小值 (最弱那个字)
       geo  : 逐字最大概率的几何平均 = exp(mean(log p))
+
+    return_chars=True 时多返回一个 dict（issue #19）:
+      {"chars": [...], "char_scores": [...], "char_pos": [...]}
+    char_scores 是每个字在它那几帧上的最大概率均值, 下游可据此只复核数字/关键字符。
     """
     a = np.asarray(logits)
     if a.ndim != 2:
@@ -80,14 +84,17 @@ def ctc_greedy(logits, charset, blank=BLANK, score_mode="mean"):
         a = e / e.sum(axis=1, keepdims=True)
     idx = a.argmax(axis=1)
     scores = a[np.arange(len(idx)), idx]
-    out, out_scores = [], []
+    out, out_scores, out_ts = [], [], []
     prev = -1
     for t, i in enumerate(idx):
         if i != prev and i != blank:
             out.append(charset[i - 1] if i - 1 < len(charset) else "")
             out_scores.append(float(scores[t]))
+            out_ts.append(t)
         prev = i
     if not out_scores:
+        if return_chars:
+            return "", 0.0, {"chars": [], "char_scores": [], "char_pos": []}
         return "", 0.0
     arr = np.asarray(out_scores, dtype=np.float64)
     if score_mode == "min":
@@ -96,7 +103,20 @@ def ctc_greedy(logits, charset, blank=BLANK, score_mode="mean"):
         score = float(np.exp(np.log(np.maximum(arr, 1e-12)).mean()))
     else:
         score = float(arr.mean())
-    return "".join(out), score
+    text = "".join(out)
+    if return_chars:
+        # issue #19: 逐字置信度。CTC 里同一个字可能占据多帧（重复帧被合并），
+        # 这里把属于该字的所有帧的最大概率取均值，比只看第一帧更稳。
+        char_scores = []
+        for j, t in enumerate(out_ts):
+            t_end = out_ts[j + 1] if j + 1 < len(out_ts) else len(idx)
+            cls = idx[t]
+            span = np.arange(t, t_end)
+            span = span[idx[span] == cls]
+            char_scores.append(float(scores[span].mean()) if span.size else out_scores[j])
+        return text, score, {"chars": list(out), "char_scores": char_scores,
+                             "char_pos": list(range(len(out)))}
+    return text, score
 
 
 def edit_distance(a, b):
