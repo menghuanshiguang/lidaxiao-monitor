@@ -281,6 +281,31 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 不在白名单的散文件已归位:`agent_task.md`、`发布规律分析.md` → `docs/`;`audit_p2.py`、
 `frame_dedup.py`、`batch_subtitles.py`、`local_*.py` → 包内或 `local/`。
 
+### 对外可见变更(拆分后 `monitor` 不再导出的名字)
+
+拆分原则是「只搬家不改逻辑」,但模块化必然让一部分名字离开 `monitor` 的命名空间。
+仓库内已逐个 grep 确认 **0 消费者**;仓库外若有旧脚本按 `monitor.xxx` 取用,按下表换路径。
+
+| 不再从 `monitor` 可见 | 现在去哪 |
+|---|---|
+| `win_to_msys` | **无替代,已删除**(Windows 路径转换随 bilidown 调用点并入 `lidaxiao/sources/bilibili.py`) |
+| `BASH` / `BILIDOWN_SCRIPT` | `lidaxiao.sources.bilibili` |
+| `DEFAULT_UID` / `load_deepseek_key` | `lidaxiao.config` |
+| `FFMPEG` | `lidaxiao.common` |
+| `LOCK_STALE_SECONDS` / `read_state_lines` / `_pid_alive` | `lidaxiao.runtime.state` |
+| `get_ocr` / `_ocr`(单例) / `_ocr_video_impl` / `frame_sig` / `_sig_mad` / `dedupe_frames` | `lidaxiao.ocr.engine` / `lidaxiao.ocr.pipeline` |
+| `tail_frames` / `load_ending_cache` / `save_ending_cache` / `_ending_cache_path` | `lidaxiao.vision.ending` |
+| `vision_providers` / `_call_vision_once` / `_call_dsv` / `VISION_CLI_PROVIDER` | `lidaxiao.analyze.llm` |
+| `ENDING_PROMPT_VER` | `lidaxiao.prompts` |
+| stdlib 模块名 `base64` / `datetime` / `glob` / `hashlib` / `io` / `json` / `re` / `shutil` / `subprocess` / `urllib` | 已从 `monitor` 移除(拆分后无使用者),需要就自己 import |
+
+**仍然从 `monitor` 可见**(兼容面,`bench/`、`_setup/`、旧脚本在用,共 31 个已实测):
+`load_config`、`load_llm_key`、`RunLock`、`mark_processed`、`processed_bvids`、`processed_status_map`、
+`is_success_status`、`is_from_baseline`、`read_ending_hint`、`ocr_video`、`merge_ts_lines`、`list_line`、
+`ANALYZE_SYSTEM`、`ENDING_PROMPT`、`REPORT_SECTIONS`、`REPORT_TAIL`、`ffprobe_duration`、`extract_frames`、
+`ocr_frame`、`probe_band_heuristic`、`probe_subtitle_band`、`filter_ocr_text`、`norm_text`、`read_text`、
+`write_text`、`WORKDIR`、`CN_TZ`、`STATE_DIR`、`DISCLAIMER`、`FFMPEG_DIR`、`FFPROBE`。
+
 ## 🧠 配套 Skill: daxiao-strategy
 
 [`skills/daxiao-strategy`](./skills/daxiao-strategy/SKILL.md) 把日报转成**可执行决策**(观点 → 定性 → 操作):
