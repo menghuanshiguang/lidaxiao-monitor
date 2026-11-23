@@ -1,5 +1,6 @@
 """文本工具: 日志 / 读写 / 归一化 / OCR 文本过滤 (从 monitor.py 抽出, 逻辑未改)"""
 import datetime
+import os
 import re
 
 TS_RE = re.compile(r"^\s*(\d{1,2}:\d{2}(:\d{2})?)\s*$")
