@@ -22,7 +22,7 @@ def ocr_video(cfg, video_path, bvid):
     eng = (os.environ.get("LIDAXIAO_OCR_ENGINE") or cfg.get("ocr_engine") or "rapid").lower()
     if eng == "xiaomi":
         try:
-            from xiaomi_ocr import XiaomiOCR
+            from lidaxiao.ocr.engines.xiaomi import XiaomiOCR
             xm = XiaomiOCR(cfg.get("xiaomi_ocr") or {}, log=log)
             if not xm.start():
                 log("⚠ Xiaomi-OCR 启动失败, 本次回退 RapidOCR")
@@ -32,7 +32,7 @@ def ocr_video(cfg, video_path, bvid):
             xm = None
     elif eng == "aoyuon":
         try:
-            from aoyuon_ocr import AoyuonOCR
+            from lidaxiao.ocr.engines.aoyuon import AoyuonOCR
             xm = AoyuonOCR(cfg.get("aoyuon") or {}, log=log)
             if not xm.start():
                 log("⚠ Aoyuon-OCR 启动失败, 本次回退 RapidOCR")
