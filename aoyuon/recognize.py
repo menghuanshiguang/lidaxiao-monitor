@@ -19,7 +19,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from band import find_line_boxes  # noqa: E402
-from common import ctc_greedy, preprocess, read_charset, read_config  # noqa: E402
+from common import (ctc_greedy, preprocess, read_charset, read_config,  # noqa: E402
+                    restore_punct, split_wide)
 from onnx_engine import OnnxCRNN  # noqa: E402
 
 DEFAULT_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model")
@@ -28,10 +29,17 @@ DEFAULT_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mo
 class Recognizer:
     provides_boxes = True
 
-    def __init__(self, model_dir=DEFAULT_MODEL_DIR, threads=4, min_score=0.0,
-                 pad_x=10, pad_y=6, lm_path=None, lm_weight=0.3, beam=8):
+    def __init__(self, model_dir=DEFAULT_MODEL_DIR, threads=4, min_score=0.0, punct=True,
+                 pad_x=10, pad_y=6, lm_path=None, lm_weight=0.3, beam=8,
+                 neighbor=True, chunk_wide=True, score_mode="geo"):
         # pad_x/pad_y 必须与 build_dataset.py 的裁图边距一致: 训练裁图和推理裁图
         # 的上下留白不同会让字重/字高分布漂移, 直接表现为"训练集 70% 命中, 整帧全错"。
+        # neighbor: 是否启用"邻行兜底"(找折行的第二行短行)。默认开, 关掉可复现旧行为。
+        self.neighbor = bool(neighbor)
+        # chunk_wide: 超宽行是否分块识别(False 时退回旧行为: 直接压扁, 会静默掉字)
+        self.chunk_wide = bool(chunk_wide)
+        # punct: 解码后把半角标点还原成中文全角(见 common.restore_punct)
+        self.punct = bool(punct)
         self.pad_x = int(pad_x)
         self.pad_y = int(pad_y)
         self.model_dir = model_dir
@@ -42,6 +50,9 @@ class Recognizer:
         self.max_width = int(self.config.get("max_width", 640))
         self.blank = int(self.config.get("blank", 0))
         self.min_score = float(min_score)
+        # score_mode: 整行置信度算法 (issue #8: geo 的可分性最好, AUC 0.78 vs mean 0.77;
+        # 0~1, 不含 LM 项; 只在贪心解码下生效)
+        self.score_mode = score_mode
         # 优先 int8 部署模型, 退到 fp32
         cand = [os.path.join(model_dir, "model.onnx"),
                 os.path.join(model_dir, "model_int8.onnx"),
@@ -73,17 +84,45 @@ class Recognizer:
                         max(0, x0 - self.pad_x), min(w, x1 + self.pad_x)))
         return out
 
-    def _run(self, crop_bgr):
-        x = preprocess(crop_bgr, height=self.height, max_width=self.max_width)
+    def _run_one(self, piece):
+        x = preprocess(piece, height=self.height, max_width=self.max_width)
         logits = self.engine.logits(x)
         if self.lm is None:
-            text, score = ctc_greedy(logits, self.charset, blank=self.blank)
+            return ctc_greedy(logits, self.charset, blank=self.blank,
+                              score_mode=self.score_mode)
+        from ctc_lm import ctc_beam_lm
+        return ctc_beam_lm(logits, self.charset, self.lm, beam=self.beam,
+                           lm_weight=self.lm_weight, blank=self.blank)
+
+    def _run(self, crop_bgr):
+        """单行裁剪 -> (text, score, info)。
+
+        超过 max_width 的行不再静默压扁: 按字间空隙切块分别识别再拼回去,
+        info["overflow"]=True 且 info["n"]>1, 调用方可在 meta 里看到。
+        """
+        if self.chunk_wide:
+            chunks, info = split_wide(crop_bgr, height=self.height,
+                                      max_width=self.max_width)
         else:
-            from ctc_lm import ctc_beam_lm
-            text, score = ctc_beam_lm(logits, self.charset, self.lm,
-                                      beam=self.beam, lm_weight=self.lm_weight,
-                                      blank=self.blank)
-        return text, float(score)
+            chunks, info = [crop_bgr], {"n": 1, "split_x": [], "overflow": False}
+        if info["n"] == 1:
+            text, score = self._run_one(chunks[0])
+            return self._post(text), float(score), info
+        texts, scores = [], []
+        for c in chunks:
+            t, sc = self._run_one(c)
+            if t:
+                texts.append(t)
+                scores.append(float(sc))
+        return self._post("".join(texts)), (min(scores) if scores else 0.0), info
+
+    def _post(self, text):
+        """解码后处理: 标点风格还原（见 common.restore_punct 的说明）。
+
+        v7 训练标签把全角标点归一成了半角，模型学到的是半角标点；这里还原成
+        中文全角，保证输出风格与老师一致。数字内部（1,000 / 1.5）不动。
+        """
+        return restore_punct(text) if self.punct else text
 
     # -------------------------------------------------------------- 对外接口
     def __call__(self, img_bgr, is_band=None):
@@ -98,12 +137,15 @@ class Recognizer:
             img_bgr = np.stack([img_bgr] * 3, axis=-1)
         img = img_bgr
         h, w = img.shape[:2]
+        self.last_meta = []
 
-        boxes = self._pad_boxes(find_line_boxes(img), h, w)
+        boxes = self._pad_boxes(find_line_boxes(img, neighbor=self.neighbor), h, w)
         out = []
         if boxes:
             for y0, y1, x0, x1 in boxes:
-                text, score = self._run(img[y0:y1, x0:x1])
+                text, score, info = self._run(img[y0:y1, x0:x1])
+                info = dict(info, y=float(y0), x=float(x0))
+                self.last_meta.append(info)
                 if text and score >= self.min_score:
                     out.append((float(y0), float(x0), text, score))
             return out
@@ -112,7 +154,8 @@ class Recognizer:
             is_band = self._is_band(img)
         if is_band:
             # 已裁好的字幕带: 整块当一行
-            text, score = self._run(img)
+            text, score, info = self._run(img)
+            self.last_meta.append(dict(info, y=0.0, x=0.0))
             if text and score >= self.min_score:
                 return [(0.0, 0.0, text, score)]
             return []
@@ -120,9 +163,11 @@ class Recognizer:
         # 整帧但没检测到字幕行: 契约兜底, 取底部 30%
         y_off = int(h * 0.70)
         band = img[y_off:]
-        bb = self._pad_boxes(find_line_boxes(band), band.shape[0], band.shape[1])
+        bb = self._pad_boxes(find_line_boxes(band, neighbor=self.neighbor),
+                            band.shape[0], band.shape[1])
         for by0, by1, bx0, bx1 in bb:
-            text, score = self._run(band[by0:by1, bx0:bx1])
+            text, score, info = self._run(band[by0:by1, bx0:bx1])
+            self.last_meta.append(dict(info, y=float(y_off + by0), x=float(bx0)))
             if text and score >= self.min_score:
                 out.append((float(y_off + by0), float(bx0), text, score))
         return out
@@ -132,7 +177,10 @@ def main():
     ap = argparse.ArgumentParser(description="单行中文字幕识别")
     ap.add_argument("--image", required=True, help="图片路径 (整帧或字幕带)")
     ap.add_argument("--model", default=DEFAULT_MODEL_DIR)
+    ap.add_argument("--score-mode", default="geo", choices=["mean", "min", "geo"])
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--no-punct", action="store_true",
+                    help="不把半角标点还原成全角")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--lm", default=None, help="字符 n-gram LM 路径 (开启束搜索解码)")
     ap.add_argument("--lm-weight", type=float, default=0.3)
@@ -142,7 +190,8 @@ def main():
     img = cv2.imread(args.image)
     if img is None:
         raise SystemExit(f"读不到图片: {args.image}")
-    rec = Recognizer(args.model, threads=args.threads, lm_path=args.lm, lm_weight=args.lm_weight)
+    rec = Recognizer(args.model, threads=args.threads, punct=not args.no_punct,
+                     lm_path=args.lm, lm_weight=args.lm_weight)
     boxes = rec(img)
     if args.json:
         print(json.dumps([[y, x, t, round(s, 4)] for y, x, t, s in boxes], ensure_ascii=False))

@@ -158,8 +158,47 @@ def _row_runs(prof, thr, min_len=8, gap=2):
     return [(int(r[0]), int(r[-1]) + 1) for r in runs if len(r) >= min_len]
 
 
+def _dilate1d(prof, r=2):
+    """1-D 最大值滤波: 填掉行投影里的浅谷(短行内部笔画间隙), 避免把一行切碎。"""
+    if r <= 0 or prof.size == 0:
+        return prof
+    pad = np.pad(prof, r, mode="edge")
+    k = 2 * r + 1
+    return np.max(np.stack([pad[i:i + prof.size] for i in range(k)]), axis=0)
+
+
+def _line_in_span(rs, lo, hi, min_peak_ratio=None, ref_peak=None):
+    """在绝对行号 [lo, hi) 里找一段像文字行的高支撑行段, 返回 (a, b) 或 None。
+
+    与主搜索的区别: 阈值按**本段自己的** p99 取 0.25, 并先做 1-D 膨胀。
+    这样 2~4 字的短行(支撑只有主行的 1/4)也能留住 —— 见 issue #1。
+    """
+    lo = max(0, int(lo))
+    hi = min(int(hi), rs.size)
+    if hi - lo < 6:
+        return None
+    seg = _dilate1d(rs[lo:hi], 2)
+    p = float(np.percentile(seg, 99))
+    if p < 8:
+        return None
+    if min_peak_ratio is not None and ref_peak and p < min_peak_ratio * ref_peak:
+        return None
+    thr = max(3.0, 0.25 * p)
+    runs = _row_runs(seg, thr, min_len=6, gap=2)
+    if not runs:
+        return None
+    a, b = max(runs, key=lambda r: float(seg[r[0]:r[1]].sum()))
+    return (lo + a, lo + b)
+
+
+def _like_line(span, h_ref, lo=0.55, hi=1.6):
+    """补找出来的行要和已确认行"长得像一行": 高度在同一量级。"""
+    h = span[1] - span[0]
+    return 6 <= h <= hi * h_ref and h >= lo * h_ref
+
+
 def find_line_boxes(img_bgr, box=None, pad_x=6, pad_y=3, max_lines=4,
-                    bottom_frac=0.55, y_min_frac=0.68, **kw):
+                    bottom_frac=0.55, y_min_frac=0.68, neighbor=True, **kw):
     """返回字幕的逐行框 [(y0, y1, x0, x1), ...], 每行一个, 绝对坐标。
 
     box 给定时只在该区域内切行; 否则自己在画面下方找字幕行:
@@ -219,7 +258,32 @@ def find_line_boxes(img_bgr, box=None, pad_x=6, pad_y=3, max_lines=4,
         runs = [(a, b) for a, b in runs if (b - a) >= 0.45 * hmax]
         lines_rows = [(y0 + a, y0 + b) for a, b in runs]
 
+    # 邻行兜底: 折行的短行(2~4 字, 行投影只有主行的 1/4)会被上面的阈值吃掉,
+    # 在已确认行的上下各再找一段, 距离放 1.5 倍行高以内(字幕折行总是紧贴的)。
+    lines_rows = sorted(set(lines_rows))
+    lo_reg, hi_reg = (y0, y1) if box is not None else (y_start, h_img)
+    ref = float(rs[lines_rows[0][0]:lines_rows[-1][1]].max()) if lines_rows else 0.0
+    while neighbor and lines_rows and len(lines_rows) < max_lines:
+        h_cur = max(b - a for a, b in lines_rows)
+        added = False
+        cur = lines_rows[-1][1]
+        if cur < hi_reg - 4:
+            got = _line_in_span(rs, cur, hi_reg, 0.15, ref)
+            if got and _like_line(got, h_cur) and got[0] - cur <= 1.5 * h_cur:
+                lines_rows.append(got)
+                added = True
+        if len(lines_rows) < max_lines:
+            cur = lines_rows[0][0]
+            if cur > lo_reg + 4:
+                got = _line_in_span(rs, lo_reg, cur, 0.15, ref)
+                if got and _like_line(got, h_cur) and cur - got[1] <= 1.5 * h_cur:
+                    lines_rows.insert(0, got)
+                    added = True
+        if not added:
+            break
+
     out = []
+    raw = []
     for a, b in lines_rows[:max_lines]:
         ny0 = max(0, a - pad_y)
         ny1 = min(h_img, b + pad_y)
@@ -227,4 +291,11 @@ def find_line_boxes(img_bgr, box=None, pad_x=6, pad_y=3, max_lines=4,
         if xr is None:
             continue
         out.append((int(ny0), int(ny1), int(xr[0]), int(xr[1])))
+        raw.append((int(a), int(b)))
+    # 相邻两行的 pad 不要互相吃进来: 在原始间隙中点处切断
+    for i in range(len(out) - 1):
+        if out[i][1] > out[i + 1][0]:
+            mid = (raw[i][1] + raw[i + 1][0]) // 2
+            out[i] = (out[i][0], min(out[i][1], mid), out[i][2], out[i][3])
+            out[i + 1] = (max(out[i + 1][0], mid), out[i + 1][1], out[i + 1][2], out[i + 1][3])
     return out

@@ -55,8 +55,14 @@ def preprocess(crop_bgr, height=IMG_H, max_width=MAX_W, to_float=True):
     return g
 
 
-def ctc_greedy(logits, charset, blank=BLANK):
-    """logits: (T, C) 或 (C, T) 的 log-probs 或 probs; 返回 (text, score)。"""
+def ctc_greedy(logits, charset, blank=BLANK, score_mode="mean"):
+    """logits: (T, C) 或 (C, T) 的 log-probs 或 probs; 返回 (text, score)。
+
+    score_mode 决定整行置信度的算法 (issue #8 实测: geo 的可分性最好):
+      mean : 逐字最大概率的均值 (历史默认)
+      min  : 逐字最大概率的最小值 (最弱那个字)
+      geo  : 逐字最大概率的几何平均 = exp(mean(log p))
+    """
     a = np.asarray(logits)
     if a.ndim != 2:
         raise ValueError(f"expect 2-D, got {a.shape}")
@@ -81,7 +87,15 @@ def ctc_greedy(logits, charset, blank=BLANK):
             out.append(charset[i - 1] if i - 1 < len(charset) else "")
             out_scores.append(float(scores[t]))
         prev = i
-    score = float(np.mean(out_scores)) if out_scores else 0.0
+    if not out_scores:
+        return "", 0.0
+    arr = np.asarray(out_scores, dtype=np.float64)
+    if score_mode == "min":
+        score = float(arr.min())
+    elif score_mode == "geo":
+        score = float(np.exp(np.log(np.maximum(arr, 1e-12)).mean()))
+    else:
+        score = float(arr.mean())
     return "".join(out), score
 
 
@@ -109,11 +123,41 @@ def cer(ref, hyp):
         return 0.0 if not hyp else 1.0
     return edit_distance(ref, hyp) / len(ref)
 
-def normalize_text(s):
-    """评分用的规范化：只抹平“与识别无关的排版差异”。
+_FW_PUNCT = {",": "，", ".": "。", ":": "：", ";": "；", "?": "？", "!": "！",
+             "(": "（", ")": "）"}
 
-    NFKC 统一全/半角，去掉所有空白，统一全角标点。不碰繁简、不改字形，
-    所以它不会把识别错误洗掉——只让“空格/标点风格”这类无关差异不计入错误。
+
+def restore_punct(s):
+    """把输出里的半角标点还原成中文全角标点（数字内部不动）。
+
+    为什么需要：数据集 v7 的训练标签被 `canonical_text` 顺手把全角标点也归一成了
+    半角（`，`->`,`），模型因此学会了半角标点，与老师原样输出的风格不一致 ——
+    逐字比对时每行带标点的样本都会被判错。这一步在**解码后**还原，数字里的
+    `1,000` / `1.5`（两侧都是数字）保持不变。
+
+    注意：顿号 `、` 在标签规范化时已经被并成 `,`，无法还原，见 eval.md 的说明。
+    """
+    if not s:
+        return s
+    out = []
+    n = len(s)
+    for i, ch in enumerate(s):
+        if ch in ".,:":
+            prev = s[i - 1] if i > 0 else ""
+            nxt = s[i + 1] if i + 1 < n else ""
+            if prev.isdigit() and nxt.isdigit():
+                out.append(ch)
+                continue
+        out.append(_FW_PUNCT.get(ch, ch))
+    return "".join(out)
+
+
+def normalize_text(s):
+    """评分用的规范化：只抹平“与识别无关的写法差异”(issue #14)。
+
+    NFKC 统一全/半角，去掉所有空白，统一全角标点，并把数字串里的千分位
+    统一成半角逗号（`1.000亿` / `1、000亿` -> `1,000亿`，仅当正好 3 位且紧跟量级词）。
+    不碰繁简、不改字形，所以它不会把识别错误洗掉。
     训练标签、模型输出都保持原样，仅在评测时对两侧同用。
     """
     import re
@@ -122,4 +166,81 @@ def normalize_text(s):
     s = re.sub(r"\s+", "", s)
     for a, b in (("，", ","), ("。", "."), ("、", ","), ("；", ";"), ("：", ":")):
         s = s.replace(a, b)
+    s = re.sub(r"(?<=\d)[.、,·](\d{3})(?=(亿|万|千|百|元|美元|港元|万亿|个百分点|%))",
+               r",\1", s)
+    s = re.sub(r"(?<=\d)\s*%", "%", s)
     return s
+
+
+def load_t2s(path=None):
+    """繁简映射表（由 opencc t2s 在本机生成，见 distill/data/t2s.json）。
+
+    没有表时返回空 dict —— 调用方降级为"不做繁简归一"，不抛异常。
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "t2s.json")
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def to_simplified(s, table=None):
+    """繁 -> 简（issue #12）。table 缺省用 load_t2s()。"""
+    if not s:
+        return s
+    m = table if table is not None else load_t2s()
+    if not m:
+        return s
+    return "".join(m.get(ch, ch) for ch in s)
+
+
+def canonical_text(s, table=None):
+    """评测/训练共用的最终规范形：繁简归一 + 数字标点归一。"""
+    return normalize_text(to_simplified(s, table))
+
+
+def is_digit_row(s):
+    """数字子集：含阿拉伯数字或百分号的行（issue #14 要求单独报这一格）。"""
+    import re
+    return bool(re.search(r"[0-9%]", s or ""))
+
+
+def split_wide(crop_bgr, height=IMG_H, max_width=MAX_W, chunk_max=None):
+    """把超宽的单行图切成若干块，每块缩放后宽度 <= max_width（issue #11）。
+
+    超宽行（片尾合规声明、荐书卡片）直接 resize 到 640 会被横向压扁，字宽/字高
+    比例偏离训练分布，结果是静默掉字 —— 所以按字间空隙切成 2~4 块分别识别再拼接。
+
+    返回 (chunks, info)：chunks 是 BGR 子图列表，info = {"n", "split_x", "overflow"}。
+    """
+    import cv2
+    h, w = crop_bgr.shape[:2]
+    if h <= 0 or w <= 0:
+        raise ValueError("empty crop")
+    nw = max(8, int(round(w * height / float(h))))
+    if nw <= max_width:
+        return [crop_bgr], {"n": 1, "split_x": [], "overflow": False}
+    chunk_max = int(chunk_max or max(8, int(max_width * 0.75)))
+    k = max(2, int(np.ceil(nw / float(chunk_max))))
+    g = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY) if crop_bgr.ndim == 3 else crop_bgr
+    # 每列"墨迹量"：暗像素(描边) + 亮像素(字身)，用来找字间空隙
+    ink = (g < 96).sum(axis=0).astype(np.int32) + (g > 200).sum(axis=0).astype(np.int32)
+    width_px = int(round(chunk_max * h / float(height)))
+    cuts = [0]
+    for i in range(1, k):
+        target = int(round(i * w / float(k)))
+        lo = max(cuts[-1] + 8, target - width_px // 3)
+        hi = min(w - 1, target + width_px // 3)
+        if hi <= lo:
+            cut = min(w - 1, max(cuts[-1] + 8, target))
+        else:
+            cut = lo + int(np.argmin(ink[lo:hi]))
+        if cut - cuts[-1] < 8:
+            cut = min(w - 1, cuts[-1] + 8)
+        cuts.append(cut)
+    cuts.append(w)
+    chunks = [crop_bgr[:, cuts[i]:cuts[i + 1]] for i in range(len(cuts) - 1)]
+    return chunks, {"n": len(chunks), "split_x": cuts[1:-1], "overflow": True}
