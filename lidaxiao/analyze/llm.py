@@ -15,15 +15,7 @@ import time
 from lidaxiao.common import CN_TZ, WORKDIR
 from lidaxiao.prompts import ANALYZE_SYSTEM, REPORT_SECTIONS, REPORT_TAIL
 from lidaxiao.textutil import log, read_text
-
-LLM_PROVIDER_KEY_ENVS = {
-    "opencode-go": ("OPENCODE_GO_API_KEY",),
-    "deepseek": ("DEEPSEEK_API_KEY",),
-    "deepseek-chat-cli": ("DSV_TOKEN", "DEEPSEEK_CHAT_CLI_TOKEN"),
-    "deepseek-vision-cli": ("DSV_TOKEN",),
-}
-
-LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
+from lidaxiao.config import FREE_PROVIDER, load_llm_key  # noqa: E402
 
 VISION_CLI_PROVIDER = "deepseek-vision-cli"
 
@@ -794,43 +786,9 @@ def analyze_subtitles(cfg, api_key, video, subtitle_text, history, ending=None):
     out = call_llm(cfg, api_key, sys_prompt, user, dsc_prompt=dsc_prompt)
     return tighten_analysis(out, subtitle_text, history)
 
-
-FREE_PROVIDER = "opencode-zen-free"
-
 THINKING_EFFORTS = ("low", "high", "max")
 
-def _env_or_envfile(name):
-    """从环境变量或工作目录 .env 文件读取单个密钥"""
-    v = os.environ.get(name, "").strip()
-    if v:
-        return v
-    envf = os.path.join(WORKDIR, ".env")
-    if os.path.exists(envf):
-        with open(envf, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("#") or "=" not in line:
-                    continue
-                # 精确匹配变量名, 避免 DSV_TOKEN 误匹配 DSV_TOKEN2 等同前缀键
-                key, val = line.split("=", 1)
-                if key.strip() == name:
-                    return val.strip().strip("'\"")
-    return ""
 
-def load_llm_key(provider=None):
-    """密钥优先级: 环境变量 > .env 文件; provider=None 时按 OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY 顺序"""
-    if provider == FREE_PROVIDER:
-        return "public"        # 免密车道固定 token, 走 OpenCode 指纹头校验
-    names = LLM_PROVIDER_KEY_ENVS.get(provider, LLM_KEY_ENVS) if provider else LLM_KEY_ENVS
-    for name in names:
-        v = _env_or_envfile(name)
-        if v:
-            return v
-    return ""
-
-def load_deepseek_key():
-    """向后兼容别名 (旧脚本/旧密钥名仍可用)"""
-    return load_llm_key()
 
 def frame_data_url(path, max_width=1280, quality=85):
     """帧 -> data:image/jpeg;base64 (降采样省 token)"""
