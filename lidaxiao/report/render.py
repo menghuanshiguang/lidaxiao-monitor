@@ -5,7 +5,7 @@ import re
 import time
 
 from lidaxiao.common import CN_TZ, DISCLAIMER, WORKDIR
-from lidaxiao.textutil import log, read_text, write_text
+from lidaxiao.textutil import CLEAN_RE, log, norm_text, read_text, write_text
 
 try:
     from lidaxiao import audit as _audit
@@ -135,8 +135,8 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
         """片尾块插在免责声明之前, 保证"以上为...不构成投资建议"仍是章节最后一行"""
         if not emd:
             return text + "\n"
-        if DISCLAIMER in text:
-            i = text.rfind(DISCLAIMER)
+        i = find_disclaimer(text)
+        if i >= 0:
             return (text[:i].rstrip() + "\n\n" + emd + "\n\n"
                     + text[i:].strip() + "\n")
         return text + "\n\n" + emd + "\n"
@@ -161,8 +161,28 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
         summary_line = f"- 视频《{video['title']}》: {one_line}" if one_line else ""
     return (with_tail(head + "\n\n" + analysis.strip()), summary_line)
 
+def find_disclaimer(text):
+    """免责声明在 text 中的起始下标; 找不到返回 -1。
+
+    先按精确子串找; 找不到再按 norm_text 的去符号口径找一次 —— 模型常把常量里的
+    半角逗号写成全角「，」, 精确匹配会漏, ensure_disclaimer 于是把同一句话追加两遍
+    (2026-11-23 那份 baseline 的 2 处就是这么来的)。归一化只抹掉标点与空白, 改字或
+    改词的变体仍然判为"没有", 不会把缺声明的报告当成有。
+    """
+    i = text.rfind(DISCLAIMER)
+    if i >= 0:
+        return i
+    needle = norm_text(DISCLAIMER)
+    if not needle:
+        return -1
+    pos = norm_text(text).rfind(needle)
+    if pos < 0:
+        return -1
+    keep = [idx for idx, ch in enumerate(text) if not CLEAN_RE.fullmatch(ch)]
+    return keep[pos] if pos < len(keep) else -1
+
 def ensure_disclaimer(analysis):
-    if DISCLAIMER not in analysis:
+    if find_disclaimer(analysis) < 0:
         analysis = analysis.rstrip() + "\n\n" + DISCLAIMER
     return analysis
 
