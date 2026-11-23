@@ -207,10 +207,16 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 ## 📂 目录结构
 
 ```
+├── README.md                # 本文件 (含目录结构与根目录保留清单)
+├── LICENSE                  # MIT
+├── .gitignore               # 忽略 __pycache__ / data/ / reports/ 等运行期产物
+├── .github/workflows/       # monitor.yml · monitor-ubuntu.yml · vision-selftest.yml · tests.yml
+├── requirements.txt         # Python 依赖 (monitor.yml:41 直接 pip install -r 它)
+├── run_monitor.cmd          # Windows 计划任务/手动包装 (日志 → data\run.log)
+├── start_local_daemon.cmd   # Windows 本地守护启动 (Ollama 环境预设)
 ├── lidaxiao.py              # ⭐ 统一入口 (--once 云端/本地自适应, --daemon 本地守护)
 ├── monitor.py               # 编排 + 入口: 只剩 main / process_video (464 行)
 ├── config.json              # 配置 (UID/OCR/LLM五级通道/片尾视觉)
-├── requirements.txt         # Python 依赖
 ├── aoyuon_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/aoyuon.py
 ├── xiaomi_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/xiaomi.py
 │
@@ -254,6 +260,26 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 ├── data/                    # 运行时 (不入库): 视频 / 帧 / 日志 / 锁
 └── reports/                 # 本地日报 (不入库, 发布时按 BV 合并进 docs/reports)
 ```
+
+### 根目录保留清单(拆分后口径)
+
+**`.py` 严格**:根目录只允许 `monitor.py`、`lidaxiao.py` 两个入口,加 `aoyuon_ocr.py` /
+`xiaomi_ocr.py` 两个 **1 行兼容 shim**(旧引用 `from xiaomi_ocr import XiaomiOCR` 仍可用)。
+业务代码一律在 `lidaxiao/`、`local/`、`_setup/`、`bench/` 等子目录里,根目录业务 `.py` 为 0。
+
+**非 `.py` 走白名单**,只保留这几个:
+
+| 文件 | 为什么必须在根目录 |
+|---|---|
+| `README.md` | 仓库首页 |
+| `LICENSE` | MIT 许可证 |
+| `.gitignore` | 忽略 `__pycache__`/`data/`/`reports/` 等运行期产物 |
+| `requirements.txt` | `monitor.yml:41` 直接 `pip install -r requirements.txt`,搬走 CI 当场断 |
+| `run_monitor.cmd` | Windows 计划任务/手动入口 |
+| `start_local_daemon.cmd` | Windows 本地守护入口 |
+
+不在白名单的散文件已归位:`agent_task.md`、`发布规律分析.md` → `docs/`;`audit_p2.py`、
+`frame_dedup.py`、`batch_subtitles.py`、`local_*.py` → 包内或 `local/`。
 
 ## 🧠 配套 Skill: daxiao-strategy
 
@@ -308,7 +334,7 @@ A: 多数视频无官方字幕,且硬字幕(画面内文字)才是他真正展�
 A: `python _setup/login_wait.py` 重新扫码 → 转 base64 → `gh secret set BILIBILI_COOKIES_B64`。
 
 **Q: 每天跑多少次最合理?**
-A: 400 条样本统计:日均 3.67 条,高峰 10-15 时(40%)与 18-23 时(43%),中位间隔 3 小时 → 云端 2 次 + 本地守护 2 次 + 计划任务 7 次方案,依据见 [`发布规律分析.md`](./发布规律分析.md)。
+A: 400 条样本统计:日均 3.67 条,高峰 10-15 时(40%)与 18-23 时(43%),中位间隔 3 小时 → 云端 2 次 + 本地守护 2 次 + 计划任务 7 次方案,依据见 [`发布规律分析.md`](./docs/发布规律分析.md)。
 
 ---
 
