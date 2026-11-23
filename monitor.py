@@ -489,7 +489,7 @@ def find_downloaded_mp4(bvid):
     return None
 
 
-def _direct_download(bvid):
+def _direct_download(bvid, outdir=None):
     """直链兜底下载: B站 CDN 对机房 IP 要求带 Range 头, 否则 567/403
 
     走 playurl(platform=html5) 的 durl 单文件(480p, 音视频已合并),
@@ -516,7 +516,7 @@ def _direct_download(bvid):
             log(f"兜底下载: API 未返回 durl (code={j.get('code')} {j.get('message')})")
             return None
         url = durl[0]["url"]
-        outdir = os.path.join(WORKDIR, "downloads", bvid)
+        outdir = outdir or os.path.join(WORKDIR, "downloads", bvid)
         os.makedirs(outdir, exist_ok=True)
         dest = os.path.join(outdir, f"{bvid}.mp4")
         tmp = dest + ".part"
@@ -528,6 +528,17 @@ def _direct_download(bvid):
                 if chunk:
                     f.write(chunk)
         size = os.path.getsize(tmp)
+        if total and size != total:
+            os.remove(tmp)
+            log(f"兜底下载: 响应长度不符 {size}/{total}B")
+            return None
+        content_range = r.headers.get("Content-Range", "")
+        if r.status_code == 206:
+            byte_range = re.fullmatch(r"bytes 0-(\d+)/(\d+)", content_range)
+            if not byte_range or int(byte_range[1]) + 1 != size or int(byte_range[2]) != size:
+                os.remove(tmp)
+                log("兜底下载: HTTP 206 未覆盖完整媒体")
+                return None
         if size < 200 * 1024:
             os.remove(tmp)
             log(f"兜底下载: 文件过小 {size}B, 丢弃")
@@ -537,7 +548,7 @@ def _direct_download(bvid):
             + (f" / {total/1048576:.1f}MB" if total else ""))
         return dest
     except Exception as e:
-        log(f"兜底下载失败: {type(e).__name__}: {e}")
+        log(f"兜底下载失败: {type(e).__name__}: " + re.sub(r"https?://\S+|url: \S+", "[URL]", str(e)))
         return None
 
 

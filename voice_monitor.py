@@ -86,9 +86,23 @@ def process(tool_root, root, video, downloader):
         if not published or not duration:
             raise RuntimeError("平台缺少发布时间或时长")
         video.update(title=info["title"], published=published, duration=duration)
-        command([*downloader, "--no-playlist", "-f", "bestaudio/best",
-                 "-o", output, "--", video["url"]], timeout=600)
-        media, = folder.glob("media.*")
+        try:
+            command([*downloader, "--no-playlist", "-f", "bestaudio/best",
+                     "-o", output, "--", video["url"]], timeout=600)
+            media, = folder.glob("media.*")
+        except (RuntimeError, subprocess.TimeoutExpired) as exc:
+            if video["platform"] != "bilibili":
+                raise
+            logging.warning("%s 音频直取失败，尝试 HTML5 公开媒体: %s",
+                            video["id"], str(exc).splitlines()[0])
+            from monitor import _direct_download
+            try:
+                fallback = _direct_download(video["id"], outdir=folder)
+            except ModuleNotFoundError as dependency:
+                raise RuntimeError("HTML5 媒体兜底依赖项目 requirements.txt 中的 requests") from dependency
+            if not fallback:
+                raise RuntimeError("B站音频直取与 HTML5 媒体兜底均失败") from exc
+            media = Path(fallback)
         audio_duration = float(command([
             tool_root / "bin" / "ffprobe.exe", "-v", "error", "-select_streams", "a:0",
             "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", media,
@@ -186,7 +200,9 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     handler = RotatingFileHandler(root / "voice.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
     logging.basicConfig(level=logging.INFO, handlers=[handler], format="%(asctime)s %(levelname)s %(message)s")
-    os.environ["PYTHONPATH"] = str(args.tool_root.resolve() / "deps")
+    os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(args.tool_root.resolve() / "deps"), os.environ.get("PYTHONPATH"),
+    )))
     downloader = [sys.executable, "-X", "utf8", "-m", "yt_dlp", "--ignore-config", "--no-progress",
                   "--no-colors", "--socket-timeout", "20", "--retries", "1"]
     with (root / "voice.lock").open("a+b") as lock:
