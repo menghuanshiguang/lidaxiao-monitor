@@ -106,6 +106,8 @@ pip install -r requirements.txt
 git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
 ```
 
+> ⚠️ **bilidown CLI 版本下限 `e6e89a34`**：主路径 `download_to` 从这一版起才发 `Range: bytes=0-`。更旧的版本在机房 IP（GitHub runner）上会被 CDN 以 **403 / 567** 拒掉，只能靠 `lidaxiao/sources/bilibili.py` 的保底路径下下来——日志里出现 `✅ 兜底下载完成(Range)` 就说明 cli 是旧的。`monitor.yml:107` 用 `--depth 1` 跟 main，正常不会钉在旧版，自己克隆时注意别用陈旧的本地副本。
+
 ### 2️⃣ 配置(密钥可选,B站登录建议做)
 
 ```bash
@@ -305,6 +307,34 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 `ANALYZE_SYSTEM`、`ENDING_PROMPT`、`REPORT_SECTIONS`、`REPORT_TAIL`、`ffprobe_duration`、`extract_frames`、
 `ocr_frame`、`probe_band_heuristic`、`probe_subtitle_band`、`filter_ocr_text`、`norm_text`、`read_text`、
 `write_text`、`WORKDIR`、`CN_TZ`、`STATE_DIR`、`DISCLAIMER`、`FFMPEG_DIR`、`FFPROBE`。
+
+## 🧪 测试与验收口径
+
+**三件套**（每次改动都要跑）：
+
+```bash
+python3 -m py_compile monitor.py lidaxiao.py aoyuon_ocr.py xiaomi_ocr.py \
+                       lidaxiao/*.py lidaxiao/*/*.py lidaxiao/*/*/*.py
+python3 -m pyflakes monitor.py lidaxiao.py lidaxiao/ local/ | rg 'undefined name'
+bash tests/run_all.sh
+```
+
+**本地判定是「不新增失败」，不是「全绿」。**
+本机环境是 iOS arm64 + Python 3.15.2，numpy / Pillow 没有 cp315 轮子也编不出来，所以 `bash tests/run_all.sh` **永远有这 3 个固定失败**，与代码无关：
+
+| 固定失败 | 原因 |
+|---|---|
+| `test_aoyuon_ocr.py` | `No module named 'numpy'` |
+| `test_band.py` | `No module named 'PIL'` |
+| `test_frame_dedup.py` | `No module named 'PIL'`（经 `lidaxiao/ocr/dedup.py`） |
+
+判据：**失败集合恒为这 3 个**，passed 数只增不减（拆分收尾时 33 passed；加入 `tests/test_disclaimer.py` 后 47 passed / 3 FAILED）。不许为了让本地变绿去改测试、加 `try/except`、跳过用例。**「本地跑通测试」这句话不成立**，写交付物时别用。
+
+**「全绿」由 `.github/workflows/tests.yml` 承担**：push 即跑 ubuntu-latest + Python 3.12（装了 numpy / pillow / opencv-python-headless / ripgrep）。最近一次绿 run 是 [`45235155031`](https://github.com/menghuanshiguang/lidaxiao-monitor/actions/runs/45235155031)（`0376f75`）；用例数在 ubuntu 上是 53 passed / 0 failed（`a224e65` 那次 run 的日志实测），加新测试后以 run 日志为准。里面两个**前置断言**（`pyflakes --version`、`command -v rg`）别删 —— 缺了它们 `run_all.sh` 有两条静默通过路径。
+
+**业务链路**另用 `monitor.yml` 勾 `force=true` 跑一次，日志里要看到「主扫描完成」「视频处理完成」「报告已提交并推送」，且无 `Traceback`。
+
+**报告对比口径**：行数用 `len(text.splitlines())`（末尾换行不算一行）；区块按 `【…】` **行内任意位置**数（按行首会得 0）；免责声明只报 `不构成投资建议` / `市场有巨大风险` **两列不报合计**。工具在工作区 `tools/factcheck.py`（不在仓库内）。
 
 ## 🧠 配套 Skill: daxiao-strategy
 
