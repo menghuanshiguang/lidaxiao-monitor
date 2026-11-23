@@ -536,16 +536,14 @@ def publish_reports(args, tag="local"):
                     fout.write(merged)
                 log(f"报告已合并: {f}")
             except Exception as e:
-                log(f"⚠️ 合并报告失败({f}), 回退为覆盖: {e}")
-                shutil.copy2(src, dst)
+                log(f"⚠️ 合并报告失败({f}), 保留已发布版本: {e}")
+                continue
         else:
             shutil.copy2(src, dst)
-    # latest.md = 最新日报
-    latest = daily[-1]
-    shutil.copy2(os.path.join(docs_dir, latest), os.path.join(docs_dir, "latest.md"))
-    # 重建 index.md
+    # 从所有已发布日报重建 latest 和 index，补录旧视频时不回退。
     index_daily = sorted(f for f in os.listdir(docs_dir)
                          if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f))
+    shutil.copy2(os.path.join(docs_dir, index_daily[-1]), os.path.join(docs_dir, "latest.md"))
     links = "\n".join(f"- [{f[:-3]}](./{f})" for f in index_daily)
     with open(os.path.join(docs_dir, "index.md"), "w", encoding="utf-8") as f:
         f.write("# 📺 李大霄视频日报索引\n\n" + links + "\n")
