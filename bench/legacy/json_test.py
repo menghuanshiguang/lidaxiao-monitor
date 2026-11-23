@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import monitor as m  # noqa: E402
+from lidaxiao.analyze import validate_report  # noqa: E402
 
 cfg = m.load_config()
 cfg["llm_local"]["enabled"] = True
@@ -27,6 +28,6 @@ video = {"title": meta["title"], "pubdate": meta["timestamp"], "dur_str": meta["
 t0 = time.time()
 out = m.analyze_subtitles(cfg, None, video, sub, "")
 el = time.time() - t0
-ok, miss = m.validate_report(out, sub)
+ok, miss = validate_report(out, sub)
 print(f"=== 耗时 {el:.1f}s | 长度 {len(out)} | 校验 {ok} | 缺 {miss}")
 print(out)

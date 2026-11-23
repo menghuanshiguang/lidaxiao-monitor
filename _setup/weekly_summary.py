@@ -8,6 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import monitor as m
+from lidaxiao.analyze import call_llm
 
 CN = datetime.timezone(datetime.timedelta(hours=8))
 
@@ -57,7 +58,7 @@ def main():
     cfg = m.load_config()
     user = "以下是本周(起始日 " + start + ")每日分析报告:\n\n" + "\n\n".join(reports)
     print(f"调用 {cfg['llm']['model']} 生成周报...")
-    out = m.call_llm(cfg, api_key, system, user)
+    out = call_llm(cfg, api_key, system, user)
     if "不构成投资建议" not in out:
         out += "\n\n以上为李大霄个人观点提炼,不构成投资建议"
 

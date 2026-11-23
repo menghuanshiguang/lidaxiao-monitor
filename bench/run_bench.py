@@ -15,7 +15,8 @@ import requests
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-import monitor as m  # noqa: E402
+from lidaxiao.common import CN_TZ  # noqa: E402
+from lidaxiao.prompts import ANALYZE_SYSTEM  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--tag", required=True)
@@ -46,7 +47,7 @@ else:
 print(f"history: {len(history)} chars / {len(files[-5:])} 篇; subtitle: {len(subtitle)} chars", flush=True)
 
 import datetime  # noqa: E402
-date = datetime.datetime.fromtimestamp(meta["timestamp"], m.CN_TZ).strftime("%Y-%m-%d")
+date = datetime.datetime.fromtimestamp(meta["timestamp"], CN_TZ).strftime("%Y-%m-%d")
 ending_block = ""
 user = f"""【视频信息】
 日期: {date}
@@ -61,7 +62,7 @@ user = f"""【视频信息】
 
 请按模板输出分析。"""
 
-system = m.ANALYZE_SYSTEM
+system = ANALYZE_SYSTEM
 if args.no_think:
     system = system + "\n/no_think"
 

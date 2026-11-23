@@ -9,6 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import monitor as m  # noqa: E402
+from lidaxiao.analyze import validate_report  # noqa: E402
 
 cfg = m.load_config()
 cfg["llm_local"]["enabled"] = True
@@ -27,7 +28,7 @@ if not alive:
 out = m.analyze_subtitles(cfg, None, video, sub, "")
 print("=" * 40)
 print(out)
-ok, miss = m.validate_report(out)
+ok, miss = validate_report(out)
 print("=" * 40)
 print(f"结构校验: {ok} | 缺: {miss}")
 raise SystemExit(0 if ok else 2)

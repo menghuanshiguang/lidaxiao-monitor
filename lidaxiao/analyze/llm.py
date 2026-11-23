@@ -11,7 +11,7 @@ from lidaxiao.common import CN_TZ, WORKDIR
 from lidaxiao.prompts import ANALYZE_SYSTEM, REPORT_SECTIONS, REPORT_TAIL
 from lidaxiao.textutil import log, read_text
 from lidaxiao.config import FREE_PROVIDER, load_llm_key  # noqa: E402
-from lidaxiao.llmio import (  # noqa: F401 - 再导出面: monitor.py 按 analyze.llm._apply_thinking 调用
+from lidaxiao.llmio import (  # noqa: F401 - 文本通道自用的公共件 (视觉通道直接用 llmio)
     _apply_thinking, _find_cli_path, _free_lane_post, _warn_model)
 
 

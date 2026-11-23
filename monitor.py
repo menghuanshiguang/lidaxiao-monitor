@@ -29,12 +29,9 @@ import sys
 import time
 
 # ---------- 常量 ----------
-# 原来这里有两处重复的 common import (第 40 行与第 50 行), 合并成一处。
-# FFMPEG 的唯一使用者 tail_frames 已在 P3 搬去 vision/ending.py, 此处为死引用, 去掉;
-# BASH / BILIDOWN_SCRIPT 的唯一使用者 run_bilidown 在 sources/bilibili.py 里自带一份,
-# 这两个名字在 monitor 内已无引用, 一并去掉。
-from lidaxiao.common import (  # noqa: E402
-    CN_TZ, DISCLAIMER, FFMPEG_DIR, FFPROBE, STATE_DIR, WORKDIR)
+# 只用 monitor 自己真要用的常量。CN_TZ/DISCLAIMER/FFMPEG_DIR/FFPROBE 在 monitor 内
+# 已无引用, 外部消费者 (bench/run_bench.py 的 m.CN_TZ) 已改从 lidaxiao.common 直接 import。
+from lidaxiao.common import STATE_DIR, WORKDIR  # noqa: E402
 
 try:
     from lidaxiao import audit as _audit
@@ -52,10 +49,9 @@ except Exception:
     pass
 
 
-# 以下名字在 monitor.py 内已不再直接使用, 保留 import 是给 bench/ 与旧脚本的
-# 再导出面 (实测有 bench/ab_same_frames.py 等按 m.filter_ocr_text / m.norm_text 调用)
-from lidaxiao.textutil import (  # noqa: E402
-    filter_ocr_text, log, norm_text, read_text, write_text)
+# monitor 自己只用 log/read_text/write_text; filter_ocr_text 与 norm_text 的唯一
+# 外部消费者 local/batch_subtitles.py 已改为从 lidaxiao.textutil 直接 import。
+from lidaxiao.textutil import log, read_text, write_text  # noqa: E402
 
 
 from lidaxiao.config import (  # noqa: E402
@@ -84,9 +80,11 @@ from lidaxiao.config import (  # noqa: E402
 
 
 # ---------------- bilidown 调用 ----------------
+# _direct_download / run_bilidown / expected_duration 在 monitor 内与全仓都无消费点,
+# 随再导出一起删; 需要时从 lidaxiao.sources.bilibili 取。
 from lidaxiao.sources.bilibili import (  # noqa: E402
-    _direct_download, download_video, ensure_complete_download, expected_duration,
-    fetch_video_info, find_downloaded_mp4, get_space_videos, run_bilidown)
+    download_video, ensure_complete_download, fetch_video_info, find_downloaded_mp4,
+    get_space_videos)
 
 
 # ---------------- B站 API (view 信息) ----------------
@@ -119,16 +117,13 @@ from lidaxiao.sources.bilibili import (  # noqa: E402
 # =====================================================================
 # 3. 字幕提取 (ffmpeg 抽帧 + RapidOCR)
 # =====================================================================
-# 同上: extract_frames / ocr_frame / probe_band_heuristic / probe_subtitle_band 的使用者
-# 已随函数搬去 ocr/pipeline.py, 这里保留是为了 bench 与旧脚本的 m.xxx 引用不断
-from lidaxiao.ocr.frames import (  # noqa: E402
-    extract_frames, ffprobe_duration, ocr_frame, probe_band_heuristic,
-    probe_subtitle_band)
+# 抽帧/带探测的再导出面已撤: 唯一的仓内消费者 local/batch_subtitles.py 改从
+# lidaxiao.ocr.frames 直接 import, tests/test_band.py 改从 lidaxiao.ocr.frames
+# import probe_band_heuristic。probe_subtitle_band 的消费者在 ocr/pipeline.py,
+# 与本处无关。
 
-# merge_ts_lines 在 monitor 内已无调用点, 但 local/batch_subtitles.py 用 m.merge_ts_lines,
-# 必须继续从 monitor 可见
-from lidaxiao.ocr.pipeline import (  # noqa: E402
-    merge_ts_lines, ocr_video)
+# merge_ts_lines 的外部消费者 local/batch_subtitles.py 已改从 lidaxiao.ocr.pipeline import
+from lidaxiao.ocr.pipeline import ocr_video  # noqa: E402
 
 # _setup/week_process.py 仍按 m.RunLock / m.mark_processed / m.processed_bvids 引用, 保留再导出
 from lidaxiao.runtime.state import (  # noqa: E402
@@ -157,7 +152,9 @@ from lidaxiao.runtime.state import (  # noqa: E402
 
 
 
-from lidaxiao.prompts import (ANALYZE_SYSTEM, ENDING_PROMPT, REPORT_SECTIONS, REPORT_TAIL)  # noqa: E402
+# prompts 的四个再导出已撤: bench/run_bench.py 用 ANALYZE_SYSTEM、
+# bench/legacy/run_vision.py 用 ENDING_PROMPT, 都改为从 lidaxiao.prompts 直接 import;
+# REPORT_SECTIONS / REPORT_TAIL 全仓无外部消费者。
 from lidaxiao.vision.ending import read_ending_hint  # noqa: E402
 
 
@@ -197,9 +194,10 @@ from lidaxiao.vision.ending import read_ending_hint  # noqa: E402
 
 
 
-from lidaxiao.analyze.llm import (  # noqa: E402
-    _apply_thinking, _warn_model, analyze_subtitles, build_dsc_prompt, call_llm,
-    load_history, tighten_analysis, validate_report)
+# 只留 monitor 自己要调的两个。_apply_thinking/_warn_model/build_dsc_prompt/call_llm/
+# tighten_analysis/validate_report 在 monitor 内均无调用点: call_llm 的消费者
+# _setup/weekly_summary.py、validate_report 的消费者 bench/legacy/* 已改为直接 import。
+from lidaxiao.analyze.llm import analyze_subtitles, load_history  # noqa: E402
 # check_vision 随视觉通道搬去 vision/, analyze 不再导出它
 from lidaxiao.vision import check_vision  # noqa: E402
 

@@ -29,6 +29,9 @@ WORKDIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if WORKDIR not in sys.path:
     sys.path.insert(0, WORKDIR)
 import monitor as m
+from lidaxiao.ocr.frames import extract_frames, ffprobe_duration, ocr_frame
+from lidaxiao.ocr.pipeline import merge_ts_lines
+from lidaxiao.textutil import filter_ocr_text, norm_text
 
 BOTTOM_BAND = (0.72, 0.99)
 MIN_CHARS = 30
@@ -116,9 +119,9 @@ def ocr_video_fast(video_path, bvid, conf):
     """固定底部带 OCR (批量优化版, 无探测); 返回字幕文本或空串"""
     from difflib import SequenceMatcher
     engine = get_engine()
-    dur = m.ffprobe_duration(video_path)
+    dur = ffprobe_duration(video_path)
     interval = max(1.5, min(3.0, dur / 120.0))
-    frames = m.extract_frames(video_path, bvid, interval)
+    frames = extract_frames(video_path, bvid, interval)
     if not frames:
         return ""
 
@@ -126,18 +129,18 @@ def ocr_video_fast(video_path, bvid, conf):
         out = []
         last_norm = ""
         for i in idx_list:
-            boxes = m.ocr_frame(engine, frames[i], band)
+            boxes = ocr_frame(engine, frames[i], band)
             if not boxes:
                 continue
             parts = []
             for _, _, text, score in boxes:
-                t = m.filter_ocr_text(text, conf)
+                t = filter_ocr_text(text, conf)
                 if t and score >= conf:
                     parts.append(t)
             if not parts:
                 continue
             line = " ".join(parts)
-            n = m.norm_text(line)
+            n = norm_text(line)
             if n == last_norm or (last_norm and
                                   SequenceMatcher(None, n, last_norm).ratio() > 0.85):
                 continue
@@ -149,7 +152,7 @@ def ocr_video_fast(video_path, bvid, conf):
     total = sum(len(l) for _, l in lines)
     if total < MIN_CHARS:
         extra = scan(range(0, len(frames), 6), None)
-        lines = m.merge_ts_lines(lines, extra)
+        lines = merge_ts_lines(lines, extra)
         total = sum(len(l) for _, l in lines)
     if total < MIN_CHARS:
         return ""
