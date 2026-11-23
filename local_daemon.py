@@ -460,6 +460,14 @@ def _push():
                 subprocess.run(["git", "commit", "--amend", "--no-edit"], cwd=WORKDIR,
                                check=True, capture_output=True, timeout=30)
             log("✅ 已强制恢复本地报告/state 版本")
+        # FETCH_HEAD is the main revision just fetched by the pull above.
+        guard = subprocess.run(
+            [sys.executable, "scripts/check_published_archive.py", "FETCH_HEAD", "HEAD"],
+            cwd=WORKDIR, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        if guard.returncode:
+            log(f"❌ 日报或处理状态回退，中止推送: {guard.stdout.strip() or guard.stderr.strip()}")
+            return False
         subprocess.run(["git", "push", push_url, "main"],
                        cwd=WORKDIR, check=True, capture_output=True, timeout=120)
         return True
