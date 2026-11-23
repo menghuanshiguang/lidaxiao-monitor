@@ -10,10 +10,12 @@
 
 | 指标 | 拆分前 | 现在 |
 |---|---|---|
-| `monitor.py` | 2,639 行 | **464 行**（−82%） |
-| `monitor.py` 顶层内容 | 下载 / OCR / 片尾识别 / LLM 分析 / 渲染 / 发布全在里面 | 只剩 `process_video`（L282–351）、`main`（L366–460，`add_argument` 5 处在里面）+ `if __name__` |
+| `monitor.py` | 2,639 行 | **466 行**（−82%） |
+| `monitor.py` 顶层内容 | 下载 / OCR / 片尾识别 / LLM 分析 / 渲染 / 发布全在里面 | 只剩 `process_video`（L284–353）、`main`（L368–462，`add_argument` 5 处在里面）+ `if __name__` |
 | 根目录业务 `.py` | 10 个 | **0 个**（只剩 2 个入口 + 2 个 1 行 shim） |
-| 单文件最大 | `monitor.py` 2,639 | `lidaxiao/analyze/llm.py` 863，全仓 64 个 `.py` 无一 ≥ 900 |
+| 单文件最大 | `monitor.py` 2,639 | `local/local_daemon.py` 712（包内最大 `lidaxiao/analyze/llm.py` 535），全仓 `.py` 无一 ≥ 900 |
+
+> 表内数字是 `2de9fdd` 的实测值。第 10 节第 5 条（`monitor.py` 再导出清理）在本文写作时仍在进行，`monitor.py` 行数会再降，届时以 `git show HEAD:monitor.py` 数换行为准。
 
 拆分原则是**只搬家不改逻辑**：搬家类 commit 里没有一处改行为。已知缺陷单独立项（第 10 节），不混进搬家 commit —— 这条在 P1–P5 每一笔上都核过：函数体逐字节相等，只有 import 与函数外注释跟着改。
 
@@ -37,8 +39,10 @@
 | `ocr/engines/aoyuon.py` | 219 | 本地权重引擎（vendor 包装） |
 | `ocr/engines/xiaomi.py` | 145 | llama-server 引擎 |
 | `sources/bilibili.py` | 308 | API / 更新检测 / 下载（含 `Range` 保底） |
-| `analyze/llm.py` | 863 | LLM 调用 / CLI 通道 / 视觉通道 / 结果整形 |
-| `vision/ending.py` | 140 | 片尾抽帧 + 视觉识别 + 缓存 |
+| `llmio.py` | 134 | LLM 通道公共件：模型名 / 思考参数 / 免密车道 / CLI 路径定位（`_warn_model`、`_apply_thinking`、`_find_cli_path`、`_free_derive_id`、`_free_lane_post`） |
+| `analyze/llm.py` | 535 | LLM 调用 / CLI 通道 / 结果整形 |
+| `vision/channel.py` | 242 | 片尾视觉通道：provider 选择 / 单次多图请求 / dsv CLI 调用 / 自检 |
+| `vision/ending.py` | 136 | 片尾抽帧 + 缓存 + 调度视觉通道 |
 | `report/render.py` | 258 | 渲染 / 合并 / 后处理 / 免责声明 |
 | `runtime/state.py` | 137 | `processed.txt` + 并发锁 |
 
@@ -46,7 +50,7 @@
 
 | 文件 | 行数 | 职责 |
 |---|---|---|
-| `monitor.py` | 464 | 编排 + 入口 |
+| `monitor.py` | 466 | 编排 + 入口 |
 | `lidaxiao.py` | 69 | 统一入口（`--once` / `--daemon`，自动识别云端/本地） |
 | `aoyuon_ocr.py` / `xiaomi_ocr.py` | 各 1 | **兼容 shim**，只做转发，保证 `from xiaomi_ocr import XiaomiOCR` 仍可用 |
 | `local/local_daemon.py` | 712 | 常驻定时 + 认领标志互斥 + 报告发布 |
@@ -54,7 +58,7 @@
 | `local/local_daemon_tray.py` | 88 | 托盘版（pystray） |
 | `local/batch_subtitles.py` | 263 | 批量字幕（多进程断点续传） |
 
-> 行数是 `5e6fc15` 的实测值（`git show HEAD:<path>` 数换行）。`monitor.py` / `analyze/llm.py` / `vision/ending.py` 会随第 10 节的结构债继续变，抄表前先 `git log -1`。
+> 行数是 `2de9fdd` 之后的实测值（`git show HEAD:<path>` 数换行）。`monitor.py` 会随第 10 节的结构债继续变，抄表前先 `git log -1`。
 
 ### 2.3 依赖方向（硬约束）
 
@@ -64,8 +68,17 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 
 - 新模块 `config` 与 `common` 同层，只可 import `common`。
 - `sources` 依赖 `ocr` 的 `ffprobe_duration`，不许反过来。
-- **唯一例外（P3 时经裁定）**：`vision/ending.py` 允许 `vision → analyze`，因为视觉通道实现仍在 `lidaxiao/analyze/llm.py`。硬约束不变：`analyze` 不得反向 import `vision`；`vision` 不得 import `sources` / `report` / `monitor`。
-- 自检：`grep -n '^from lidaxiao' lidaxiao/vision/ending.py`。若已经没有指向 `analyze` 的行，说明反向边已消除，本节例外连同注释可以删掉。
+- **反向边已消除**：视觉通道原先实现在 `lidaxiao/analyze/llm.py`，`vision/ending.py` 只能反向 import 它（P3 时临时裁定允许这一条）。`2de9fdd` 把视觉实现搬进 `lidaxiao/vision/channel.py`；`_warn_model` / `_apply_thinking` / `_find_cli_path` 这类**文本与视觉共用的件下沉到 `lidaxiao/llmio.py`**，没有搬进 `vision` —— 搬进 vision 只会把反向边换个方向。
+- 硬约束（永久，无例外）：`analyze` 不得 import `vision`；`vision` 不得 import `sources` / `report` / `monitor`。
+- 自检：
+  ```bash
+  python3 - <<'PY'
+  import glob
+  hits=[(p,i,l.rstrip()) for p in glob.glob('lidaxiao/vision/**/*.py',recursive=True)
+        for i,l in enumerate(open(p,encoding='utf-8'),1) if 'lidaxiao.analyze' in l]
+  print(hits or 'NO_REVERSE_EDGE')
+  PY
+  ```
 
 ---
 
@@ -95,6 +108,7 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 | 修正 | `a224e65` | `tests.yml` 补 `opencv-python-headless`（`test_aoyuon_ocr` 要 cv2） |
 | 修正 | `a24505a` | README 补「对外可见变更」一节 |
 | 修正 | `5e6fc15` | `render.py` 免责声明改归一化匹配（全角逗号不再重复追加） |
+| 结构债 | `2de9fdd` | 视觉通道搬进 `vision/channel.py`，共用件下沉 `llmio.py`，消除 `vision → analyze` 反向边 |
 
 > ⚠️ 这个仓库的 `git` 是 libgit2 实现，**路径限定的 `git log`/`git diff` 会静默返回空**（`git log --oneline -- lidaxiao/` 只出 1 笔，实际 20+ 笔）。要按路径回溯，用 `git log --oneline d9ce664..HEAD` 全量列出来人工筛，或 `git show <rev>:<path>` 取内容。
 
@@ -181,8 +195,8 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 
 | # | 条件 | 实测 |
 |---|---|---|
-| 1 | `monitor.py` < 600 行，只剩 `main` / `process_video` / 入口参数解析 | 464 行；顶层 `process_video` L282–351、`main` L366–460（`add_argument` 5 处在 `main` 内）、`if __name__` L463–464 |
-| 2 | 每个模块 < 900 行 | 全仓 64 个 `.py`，最大 `lidaxiao/analyze/llm.py` 863 |
+| 1 | `monitor.py` < 600 行，只剩 `main` / `process_video` / 入口参数解析 | 466 行；顶层 `process_video` L284–353、`main` L368–462（`add_argument` 5 处在 `main` 内）、`if __name__` |
+| 2 | 每个模块 < 900 行 | 全仓 `.py` 最大 `local/local_daemon.py` 712（包内最大 `lidaxiao/analyze/llm.py` 535），无一 ≥ 900 |
 | 3 | 三件套 | `py_compile` 0；`undefined name` 0；本地 47 passed / 3 FAILED（固定那 3 个）；ubuntu 由 `tests.yml` 全绿 |
 | 4 | 连续 3 次 force 线上成功，报告内容与拆分前一致 | run `45232765826` / `45233639404` / `45234161587` 全 success，日志均有「主扫描完成」「视频处理完成」「报告已提交并推送」，无 `Traceback`；差异归因见 5.1 |
 | 5 | 根目录只剩入口 + 白名单 | `.py` 只有 `monitor.py` / `lidaxiao.py` / 两个 1 行 shim；非 `.py` 只有 `README.md` / `LICENSE` / `.gitignore` / `requirements.txt` / `run_monitor.cmd` / `start_local_daemon.cmd` / `config.json` |
@@ -215,7 +229,7 @@ git reset --hard <上一个绿色 commit>      # 一步退回
 
 ## 9. 交接时一起带走
 
-- 更新时 HEAD：`5e6fc15`
+- 更新时 HEAD：`6846783`（随后还有 ④⑤ 两笔结构债，见 `git log -3`）
 - 固定测试集：`bench/frames/BV1x3y8zpEGD/`（54 帧，A/B 用）
 - 上游模型仓库：`aoyuon-ocr`（私有），`distill/eval.md` 有完整评测口径
 - 报告对比工具：工作区 `tools/factcheck.py`（`--selftest` 21 项，口径见第 5 节）
@@ -235,7 +249,7 @@ git reset --hard <上一个绿色 commit>      # 一步退回
 
 ### P1 · 结构债
 
-4. **`vision → analyze` 反向边**（第 2.3 节例外）——彻底解法是把视觉通道搬进 `vision/`，让 `vision` 自带实现、`analyze` 不再被反向依赖。进度以命令为准，别看文字：`grep -n 'from lidaxiao.analyze' lidaxiao/vision/*.py lidaxiao/vision/**/*.py` 已无命中，说明反向边已消除，第 2.3 节的例外与本条一并删掉。
+4. ~~**`vision → analyze` 反向边**~~ **已消除**（`2de9fdd`）：视觉实现搬进 `lidaxiao/vision/channel.py`（242 行），文本与视觉共用的件下沉到 `lidaxiao/llmio.py`（134 行），`analyze/llm.py` 863 → 535 行。复核命令见第 2.3 节。
 5. **`monitor.py` 的 imported-but-unused 再导出**：处理规则按消费者分三类 ——
    - 仓库内消费者（`batch_subtitles.py`、`bench/`）改成从新模块 import；
    - `_setup/week_process.py` 用的 `RunLock` / `mark_processed` / `processed_bvids` **必须留在 `monitor`**，那是外部脚本入口，动了就断；

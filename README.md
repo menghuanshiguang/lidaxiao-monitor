@@ -217,7 +217,7 @@ python lidaxiao.py --daemon        # 或 python local/local_daemon.py · local/l
 ├── run_monitor.cmd          # Windows 计划任务/手动包装 (日志 → data\run.log)
 ├── start_local_daemon.cmd   # Windows 本地守护启动 (Ollama 环境预设)
 ├── lidaxiao.py              # ⭐ 统一入口 (--once 云端/本地自适应, --daemon 本地守护)
-├── monitor.py               # 编排 + 入口: 只剩 main / process_video (464 行)
+├── monitor.py               # 编排 + 入口: 只剩 main / process_video (466 行)
 ├── config.json              # 配置 (UID/OCR/LLM五级通道/片尾视觉)
 ├── aoyuon_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/aoyuon.py
 ├── xiaomi_ocr.py            # 兼容 shim (1 行) → lidaxiao/ocr/engines/xiaomi.py
