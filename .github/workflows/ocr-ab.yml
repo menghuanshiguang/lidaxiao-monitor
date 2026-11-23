@@ -8,6 +8,11 @@ on:
         type: choice
         options: [band_detect, full, band]
         default: band_detect
+      ao_engine:
+        description: 'raw=原生 recognize / ocr=我们的封装'
+        type: choice
+        options: [ocr, raw]
+        default: ocr
       limit:
         description: '只跑前 N 帧 (0=全部)'
         type: string
