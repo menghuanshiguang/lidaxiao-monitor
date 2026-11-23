@@ -108,3 +108,18 @@ def cer(ref, hyp):
     if not ref:
         return 0.0 if not hyp else 1.0
     return edit_distance(ref, hyp) / len(ref)
+
+def normalize_text(s):
+    """评分用的规范化：只抹平“与识别无关的排版差异”。
+
+    NFKC 统一全/半角，去掉所有空白，统一全角标点。不碰繁简、不改字形，
+    所以它不会把识别错误洗掉——只让“空格/标点风格”这类无关差异不计入错误。
+    训练标签、模型输出都保持原样，仅在评测时对两侧同用。
+    """
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKC", s)
+    s = re.sub(r"\s+", "", s)
+    for a, b in (("，", ","), ("。", "."), ("、", ","), ("；", ";"), ("：", ":")):
+        s = s.replace(a, b)
+    return s
