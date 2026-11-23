@@ -10,15 +10,13 @@ import os
 import subprocess
 import time
 
-from lidaxiao.common import CN_TZ, FFMPEG, WORKDIR
+from lidaxiao.common import CN_TZ, FFMPEG, STATE_DIR, WORKDIR
 from lidaxiao.config import load_llm_key
 from lidaxiao.ocr.frames import ffprobe_duration
 from lidaxiao.ocr.pipeline import dedupe_frames
 from lidaxiao.prompts import ENDING_PROMPT, ENDING_PROMPT_VER
 from lidaxiao.textutil import log, read_text, write_text
 
-# 与 lidaxiao.common.STATE_DIR 同一个算法、同一个值 (本轮口径: 不把它挪进 common.py)
-STATE_DIR = os.path.join(WORKDIR, "state")
 
 # 过渡依赖 (P3 阶段裁定): 视觉通道 vision_providers / _call_vision_once / _call_dsv /
 # VISION_CLI_PROVIDER 仍在 analyze/llm.py, 交接文档 §4 把这些写成"后续合并"的工作, 本轮不做。

@@ -37,18 +37,17 @@ import urllib.parse
 import urllib.request
 
 # ---------- 常量 ----------
+# 原来这里有两处重复的 common import (第 40 行与第 50 行), 合并成一处。
+# FFMPEG 的唯一使用者 tail_frames 已在 P3 搬去 vision/ending.py, 此处为死引用, 去掉;
+# BASH / BILIDOWN_SCRIPT 的唯一使用者 run_bilidown 在 sources/bilibili.py 里自带一份,
+# 这两个名字在 monitor 内已无引用, 一并去掉。
 from lidaxiao.common import (  # noqa: E402
-    CN_TZ, DISCLAIMER, STATE_DIR, WORKDIR)
+    CN_TZ, DISCLAIMER, FFMPEG_DIR, FFPROBE, STATE_DIR, WORKDIR)
 
 try:
     from lidaxiao import audit as _audit
 except Exception:  # pragma: no cover - 模块缺失时不影响主流程
     _audit = None
-# bash 路径可用环境变量 BILIDOWN_BASH 覆盖 (如 WSL/GitBash 安装在不同位置)
-BASH = os.environ.get("BILIDOWN_BASH", r"D:\Program Files\Git\bin\bash.exe")
-BILIDOWN_SCRIPT = os.path.join(WORKDIR, "_repo", "bin", "bilidown")
-from lidaxiao.common import (  # noqa: E402
-    CN_TZ, FFMPEG, FFMPEG_DIR, FFPROBE, STATE_DIR, WORKDIR)
 
 
 
@@ -79,18 +78,6 @@ from lidaxiao.config import (  # noqa: E402
 
 
 
-
-
-# =====================================================================
-# 工具函数
-# =====================================================================
-def win_to_msys(path):
-    """C:\\a\\b -> /c/a/b (bilidown bash 脚本要求 POSIX 绝对路径)"""
-    p = path.replace("\\", "/")
-    m = re.match(r"^([A-Za-z]):(/.*)$", p)
-    if m:
-        return "/" + m.group(1).lower() + m.group(2)
-    return p
 
 
 
