@@ -63,7 +63,7 @@ jobs:
         shell: bash
         run: |
           python bench/ab_same_frames.py --frames bench/frames --bvid BV1x3y8zpEGD \
-            --limit ${{ github.event.inputs.limit }} --xm-input band --ao-input full --ao-engine ocr 2>&1 | tee ab.log
+            --limit ${{ github.event.inputs.limit }} --xm-input band --ao-input full --ao-engine ${{ github.event.inputs.ao_engine }} 2>&1 | tee ab.log
 
       - name: Upload log
         if: always()
