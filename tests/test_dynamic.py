@@ -498,15 +498,17 @@ chk("新建日报: 末行是免责声明",
 chk("新建日报: 动态标记齐全", _ndtxt.count("<!-- dynamic:") == 2,
     _ndtxt.count("<!-- dynamic:"))
 
-# 已有日报(结尾是免责声明, 像真实视频日报那样)追加动态:
-# 插入点必须是声明之前, 声明仍是末行 —— 这是最容易被写回 EOF 追加的分支。
+# 已有日报(每支视频各自以声明收尾, 像真实视频日报那样)追加动态:
+# 版面 = 视频正文 → 视频自己的声明 → ## 李大霄动态 → 动态节自带收尾声明。
+# 插入点是 EOF, 不许再「插在最后一条声明之前」——那会把上一支视频拦腰截断。
 _ex_dir = tempfile.mkdtemp()
 R.report_path = lambda date_str: os.path.join(_ex_dir, f"{date_str}.md")
 _ex_day = "2026-11-29"
 _ex_text = ("# 📺 李大霄视频日报 2026-11-29\n\n"
             "## 今日摘要\n- 视频《一支》: 摘要\n\n"
             "## 视频清单\n- [09:00] 一支 (BV1ex00001)\n\n"
-            "## 视频1: 《一支》 (BV1ex00001)\n\n【一句话摘要】一\n\n"
+            "## 视频1: 《一支》 (BV1ex00001)\n\n"
+            "【片尾暗示】白色小熊玩偶 → 熊市信号\n\n"
             + R.DISCLAIMER + "\n")
 with open(R.report_path(_ex_day), "w", encoding="utf-8") as fh:
     fh.write(_ex_text)
@@ -514,15 +516,50 @@ _ex_added = R.append_dynamics(_ex_day, entries)
 _ex_txt = R.read_text(R.report_path(_ex_day))
 _ex_nb = [l for l in _ex_txt.splitlines() if l.strip()]
 chk("已有日报追加: 写入条数", _ex_added == 2, _ex_added)
-chk("已有日报追加: 动态节在声明之前",
-    _ordered(_ex_txt, "## 李大霄动态", R.DISCLAIMER, second_last=True), _ex_nb[-3:])
+chk("已有日报追加: 视频正文与它自己的声明仍相邻(视频块没被切开)",
+    _ordered(_ex_txt, "【片尾暗示】白色小熊玩偶", R.DISCLAIMER)
+    and not any(l.startswith("## 李大霄动态")
+                for l in _ex_txt[_ex_txt.index("【片尾暗示】白色小熊玩偶"):
+                                 _ex_txt.index(R.DISCLAIMER)].splitlines()),
+    _ex_nb[-6:])
+chk("已有日报追加: 动态节排在视频块声明之后",
+    _ordered(_ex_txt, R.DISCLAIMER, "## 李大霄动态"), _ex_nb[-6:])
 chk("已有日报追加: 末行仍是免责声明", _ex_nb[-1] == R.DISCLAIMER, _ex_nb[-1])
-chk("已有日报追加: 声明没有被重复追加", _ex_txt.count(R.DISCLAIMER) == 1,
+chk("已有日报追加: 声明 = 原 1 条 + 动态节收尾 1 条", _ex_txt.count(R.DISCLAIMER) == 2,
     _ex_txt.count(R.DISCLAIMER))
-chk("已有日报追加: 声明在动态内容之后",
+chk("已有日报追加: 收尾声明在动态内容之后",
     _ordered(_ex_txt, "<!-- dynamic:", R.DISCLAIMER,
              first_last=True, second_last=True), _ex_nb[-3:])
+# 二次追加(有新 id): 不许再补一条声明, 新块插在动态节自己的收尾声明之前
+_ex_opus2 = dict(opus_parsed, id_str="1273504300584140999")
+_ex_added2 = R.append_dynamics(_ex_day, [{"dynamic": _ex_opus2, "analysis": "再看"}])
+_ex_txt2 = R.read_text(R.report_path(_ex_day))
+chk("已有日报二次追加: 新块写入", _ex_added2 == 1, _ex_added2)
+chk("已有日报二次追加: 声明条数不涨", _ex_txt2.count(R.DISCLAIMER) == 2,
+    _ex_txt2.count(R.DISCLAIMER))
+chk("已有日报二次追加: 末行仍是声明",
+    [l for l in _ex_txt2.splitlines() if l.strip()][-1] == R.DISCLAIMER)
+chk("已有日报二次追加: 新块在收尾声明之前",
+    _ordered(_ex_txt2, "1273504300584140999", R.DISCLAIMER, second_last=True),
+    [l for l in _ex_txt2.splitlines() if l.strip()][-3:])
 
+# 「分析失败、末行是 ⚠️ AI分析失败」的日报(真实 2026-11-03.md 就是这种形态):
+# 追加后末行会变成声明 —— 有意的版面收敛, 不是 bug(见陷阱表)。
+_fail_day = "2026-12-01"
+_fail_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_fail_dir, f"{date_str}.md")
+with open(R.report_path(_fail_day), "w", encoding="utf-8") as fh:
+    fh.write("# 📺 李大霄视频日报 2026-12-01\n\n## 今日摘要\n\n## 视频清单\n\n"
+             "## 视频1: 《一支》 (BV1ex00002)\n\n【一句话摘要】一\n\n"
+             + R.DISCLAIMER + "\n\n> ⚠️ AI分析失败, 仅保留字幕\n")
+R.append_dynamics(_fail_day, entries)
+_fail_txt = R.read_text(R.report_path(_fail_day))
+chk("AI失败形态: 追加后末行收敛为声明",
+    [l for l in _fail_txt.splitlines() if l.strip()][-1] == R.DISCLAIMER,
+    [l for l in _fail_txt.splitlines() if l.strip()][-2:])
+chk("AI失败形态: 原来那行失败提示没被删掉", "AI分析失败" in _fail_txt)
+
+# 未知顶层节: 反向枚举的代价是位置可能靠后, 但绝不许丢内容
 # 未知顶层节: 反向枚举的代价是位置可能靠后, 但绝不许丢内容
 _unknown = """# 📺 李大霄视频日报 2026-11-28
 

@@ -311,43 +311,51 @@ def _disclaimer_line(text):
 
 
 def _insert_dynamic_blocks(text, blocks):
-    """插入「## 李大霄动态」小节: 在视频章节之后、**免责声明之前**。
+    """追加「## 李大霄动态」小节: 整体排在所有视频块之后, 节末自带一条收尾声明。
 
-    版面硬约束(阶段 4): 免责声明必须是报告最后一行。所以插入点不是 EOF, 而是
-    声明所在行之前; 报告里没有声明时, 先用 ensure_disclaimer 补一条标准声明,
-    动态节插在它之前 —— 两条路径都保证声明收尾且只有一条声明。
+    版面硬约束(阶段 4, 督查裁决): 视频块不许被切开 —— 每支视频的正文必须和它
+    自己的声明相邻; 动态节独立成节, 排在所有视频块之后; 全文末行是声明。
+    所以插入点是 **EOF**, 不是「最后一条声明之前」: 后者会把上一支视频拦腰截断,
+    它的声明被推到动态节后面, 读者看到的动态就像那支视频的一部分(0cf14e6 的错)。
+
+    收尾声明属于动态节自己, 与文件里原来有几条无关 —— 每追加一次就多一条收尾
+    声明(已知代价: 2026-10-27 这类 6 条声明的日报变 7 条, 属正确)。
+    动态节已存在时新块插在**它自己的收尾声明之前**, 不再补第二条声明, 所以
+    二次追加不会让声明条数继续涨。
     """
     block = "\n\n".join(blocks)
     lines = text.splitlines()
-    d = _disclaimer_line(text)
     idx = next((i for i, ln in enumerate(lines)
                 if ln.strip() == DYNAMIC_SECTION), None)
-    if idx is not None:
-        end = len(lines)
-        for j in range(idx + 1, len(lines)):
-            if lines[j].startswith("## "):
-                end = j
-                break
-        if d >= 0 and idx < d < end:      # 动态节之后紧跟声明: 别把新块插到声明后面
-            end = d
-        head, tail = lines[:end], lines[end:]
-        while head and not head[-1].strip():
-            head.pop()
-        out = "\n".join(head) + "\n\n" + block + "\n"
-        if tail:
-            out += "\n" + "\n".join(tail).lstrip("\n") + "\n"
-        return out
-    if d < 0:
-        # 新建日报(或报告里根本没有声明): 动态节先落, 再补标准声明收尾
-        out = text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block
-        return ensure_disclaimer(out) + "\n"
-    head, tail = lines[:d], lines[d:]
-    while head and not head[-1].strip():
-        head.pop()
-    out = "\n".join(head) + "\n\n" + DYNAMIC_SECTION + "\n\n" + block + "\n"
-    if tail:
-        out += "\n" + "\n".join(tail).lstrip("\n") + "\n"
-    return out
+    if idx is None:
+        return (text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block
+                + "\n\n" + DISCLAIMER + "\n")
+    end = len(lines)
+    for j in range(idx + 1, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    seg = lines[idx + 1:end]
+    rest = lines[end:]
+    d = _disclaimer_line("\n".join(seg))
+    if d >= 0:
+        body, close = seg[:d], seg[d].strip()
+    else:
+        body, close = seg, DISCLAIMER
+    while body and not body[0].strip():
+        body.pop(0)
+    while body and not body[-1].strip():
+        body.pop()
+    chunk = DYNAMIC_SECTION + "\n"
+    if body:
+        chunk += "\n" + "\n".join(body) + "\n"
+    chunk += "\n" + block + "\n"
+    if close:
+        chunk += "\n" + close + "\n"
+    out = "\n".join(lines[:idx]).rstrip() + "\n\n" + chunk
+    if rest:
+        out += "\n" + "\n".join(rest).lstrip("\n") + "\n"
+    return out.rstrip() + "\n" if not rest else out
 
 
 def append_dynamics(date_str, entries, allow_create=True):
