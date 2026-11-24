@@ -700,5 +700,67 @@ try:
 finally:
     M.collect_dynamics, M.analyze_dynamic, M.append_dynamics, M.commit_dynamics = _orig
 
+# ---------------------------------------------------------------- 日期口径
+# 线上 2026-11-24 02:37 那次处理的是 11-23 发布的视频, 报告 = 2026-11-23.md。
+# 动态若按 now() 取日期, 会另建一份 2026-11-24.md 平行骨架(只有摘要/清单空壳)。
+_wd = tempfile.mkdtemp()
+os.makedirs(os.path.join(_wd, "reports"))
+for _name in ("2026-11-20.md", "2026-11-22.md", "index.md", "latest.md"):
+    open(os.path.join(_wd, "reports", _name), "w").close()
+_saved_wd = R.WORKDIR
+R.WORKDIR = _wd
+try:
+    chk("动态目标日期: 本次处理的视频报告优先(线上那次是 11-23 不是 11-24)",
+        M.dynamics_target_date([os.path.join(_wd, "reports", "2026-11-23.md")],
+                               today="2026-11-24") == "2026-11-23")
+    chk("动态目标日期: 多份报告取日期最新那份",
+        M.dynamics_target_date([os.path.join(_wd, "reports", "2026-11-19.md"),
+                                os.path.join(_wd, "reports", "2026-11-21.md")]) == "2026-11-21")
+    chk("动态目标日期: 没处理视频时退到最新一份日报",
+        M.dynamics_target_date([], today="2026-11-24") == "2026-11-22")
+    chk("动态目标日期: index.md / latest.md 不算日报",
+        R.report_date_of(os.path.join(_wd, "reports", "latest.md")) == ""
+        and R.report_date_of(os.path.join(_wd, "reports", "index.md")) == "")
+finally:
+    R.WORKDIR = _saved_wd
+_empty_wd = tempfile.mkdtemp()
+R.WORKDIR = _empty_wd
+try:
+    chk("动态目标日期: 一份日报都没有才用当天",
+        M.dynamics_target_date([], today="2026-12-31") == "2026-12-31")
+finally:
+    R.WORKDIR = _saved_wd
+
+# 端到端复现线上形态: reports 里只有 2026-11-23.md, 动态必须落进去, 不许造 2026-11-24.md
+_online_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_online_dir, f"{date_str}.md")
+with open(R.report_path("2026-11-23"), "w", encoding="utf-8") as fh:
+    fh.write("# 📺 李大霄视频日报 2026-11-23\n\n"
+             "## 今日摘要\n- 视频《一支》: 摘要\n\n"
+             "## 视频清单\n- [09:00] 一支 (BV1on00001)\n\n"
+             "## 视频1: 《一支》 (BV1on00001)\n\n【一句话摘要】一\n\n"
+             + R.DISCLAIMER + "\n")
+_orig2 = (M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics)
+try:
+    M.collect_dynamics = lambda cfg: {"status": "ok", "new": [opus_parsed]}
+    M.analyze_dynamic = lambda cfg, key, d: "看多"
+    M.commit_dynamics = lambda cfg, ds: None
+    _on_added = M.process_dynamics({"state_dir": tempfile.mkdtemp(),
+                                    "dynamic": {"enabled": True}},
+                                   "KEY", True,
+                                   [R.report_path("2026-11-23")])
+finally:
+    M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics = _orig2
+_on_files = sorted(os.listdir(_online_dir))
+_on_txt = R.read_text(R.report_path("2026-11-23"))
+chk("线上形态: 动态写进本次处理的 2026-11-23.md", _on_added == 1
+    and "## 李大霄动态" in _on_txt and "<!-- dynamic:" in _on_txt, (_on_added, _on_files))
+chk("线上形态: 不许出现 2026-11-24.md 平行骨架",
+    "2026-11-24.md" not in _on_files, _on_files)
+chk("线上形态: 报告目录只多出 0 个文件", _on_files == ["2026-11-23.md"], _on_files)
+chk("线上形态: 视频节与动态节同在一份文件, 末行是声明",
+    "## 视频1: 《一支》" in _on_txt
+    and [l for l in _on_txt.splitlines() if l.strip()][-1] == R.DISCLAIMER)
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

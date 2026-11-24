@@ -266,8 +266,8 @@ from lidaxiao.vision import check_vision  # noqa: E402
 # 5. 每日报告
 # =====================================================================
 from lidaxiao.report.render import (  # noqa: E402
-    append_dynamics, build_section, ensure_disclaimer, list_line,
-    postprocess_analysis, upsert_report)
+    append_dynamics, build_section, ensure_disclaimer, latest_report_date,
+    list_line, postprocess_analysis, report_date_of, upsert_report)
 
 
 
@@ -367,7 +367,25 @@ def process_video(cfg, api_key, video):
 
 
 
-def process_dynamics(cfg, api_key, video_ok):
+def dynamics_target_date(touched, today=None):
+    """动态写进哪份日报 —— 顺序是硬约束:
+
+    1. 本次 run 处理过的视频报告(多份取日期最新那份)。线上 2026-11-24 02:37 那次
+       处理的是 11-23 发布的视频, 报告是 2026-11-23.md; 按 now() 取日期会让动态
+       另建一份 2026-11-24.md 平行骨架(只有 今日摘要/视频清单 空壳), 与视频报告分家。
+    2. 本次没处理视频(早退路径): reports/ 下最新一份日报。
+    3. 一份日报都没有: today(调用方新建当天文件)。
+    """
+    dates = sorted(d for d in (report_date_of(p) for p in (touched or [])) if d)
+    if dates:
+        return dates[-1]
+    latest = latest_report_date()
+    if latest:
+        return latest
+    return today or datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
+
+
+def process_dynamics(cfg, api_key, video_ok, touched=None):
     """视频链路之后处理 B 站动态, 返回真正写进报告的条数。
 
     顺序是硬约束, 不许颠倒: 抓取 -> 出简版 -> 追加报告 -> **报告写成功之后**才推进 state。
@@ -376,6 +394,8 @@ def process_dynamics(cfg, api_key, video_ok):
     state 只推进真正写进报告的那些条: 一条没写进去还推进, 那些动态就被永久标成
     已处理、再也不会进报告(静默漏采)。视频列表失败时 allow_create=False,
     append_dynamics 返回 0, 这里就一条都不推进。
+
+    touched: 本次 run 写过的报告路径, 用来决定动态落进哪份日报(见 dynamics_target_date)。
     """
     collected = collect_dynamics(cfg)
     new = collected.get("new") or []
@@ -383,7 +403,11 @@ def process_dynamics(cfg, api_key, video_ok):
         return 0
     entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
                for d in new]
-    date_str = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
+    today = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
+    date_str = dynamics_target_date(touched, today)
+    src = "本次处理的视频报告" if any(report_date_of(p) for p in (touched or [])) else (
+        "最新一份日报" if date_str != today else "当天(无日报可退)")
+    log(f"ℹ️ 动态写入目标: reports/{date_str}.md (来源: {src})")
     added = append_dynamics(date_str, entries, allow_create=video_ok)
     if added == len(new):
         commit_dynamics(cfg, new)
@@ -426,6 +450,7 @@ def main():
     # 列表拉取失败(return 1)那条路径也在 finally 里, 若它新建一份空日报,
     # 等于告诉读者"当天真的没有视频", 而真实情况是根本没拉到。
     video_ok = False
+    touched = []          # 本次 run 写过的报告; finally 里的动态要用它决定落哪份
     try:
         # 1. 检测更新
         videos = get_space_videos(cfg, cfg["limit"])
@@ -471,7 +496,6 @@ def main():
             log(f"发现 {len(candidates)} 个待处理视频")
 
         # 3. 逐个处理
-        touched = []
         for v in candidates:
             ok, rp, note = process_video(cfg, api_key, v)
             status = "ok" if ok else ("error" if rp is None else "partial")
@@ -497,7 +521,7 @@ def main():
         #    反过来的话, 报告写失败会把动态永久标成已处理, 就是静默漏采换个位置重演。
         #    判重也不只靠 state: append_dynamics 按报告里的 <!-- dynamic:id --> 标记跳过。
         try:
-            process_dynamics(cfg, api_key, video_ok)
+            process_dynamics(cfg, api_key, video_ok, touched)
         except Exception as exc:            # 兜底: 动态任何异常都不改上面的返回码
             log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
         lock.release()
