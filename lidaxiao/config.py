@@ -74,7 +74,7 @@ def load_config(path=None):
             "base_url": "http://127.0.0.1:18787/v1",
             "model": "",                        # 空 = 运行时 GET /v1/models 取第一个 -free (不写死)
             "temperature": 0.3,
-            "max_tokens": 4000,
+            "max_tokens": 32768,                # 与旧直连车道一致: 思考关不掉, 正文要留足
             "timeout": 300,
         },
         "llm": {
