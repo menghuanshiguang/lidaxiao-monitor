@@ -15,7 +15,8 @@ workflow 里没有开关可找。
   1) 本地原子锁 `RunLock`(复用 lidaxiao/runtime/state.py): 跨「预检 -> 派发 ->
      确认 run 出现」全程持有, 不松手
   2) 派发前查 GitHub: `monitor.yml` 有 `queued` / `in_progress` 就跳过, 一发都不发
-  3) 本地持久记账 `state/triggered_slots.txt`: 同一 slot 派过就再也不派
+  3) 本地持久记账 `data/triggered_slots.txt`: 同一 slot 派过就再也不派
+     (放 data/ 而不是 state/: `git add state` 会把账本带进发布提交)
 
 第 3 层不能砍: dispatch 返回到 run 出现在 API 之间有秒级延迟, 同秒两个进程触发时
 第 2 层查到的都是空, 必须靠本地记账兜。
