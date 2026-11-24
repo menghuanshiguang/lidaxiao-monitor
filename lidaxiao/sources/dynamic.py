@@ -109,6 +109,31 @@ def _buvid_cookies():
     return f"buvid3={b3}; buvid4={b4}"
 
 
+def _login_cookies():
+    """登录 cookie: 复用视频链路现成的 load_cookies_dict(), 不另写一套读取。
+
+    412 的成因是**缺登录 cookie**, 与 IP 无关: 线上同组 UA/Referer/buvid/wbi 只加
+    这一项, 412 立刻变 200/code=0。没有 cookie 文件时返回 {}, 请求照发(大概率 412),
+    不抛异常 —— 本地没有那份文件也必须能跑。
+    cookie 值一律不进日志、不进报告、不落盘第二份。
+    """
+    try:
+        from lidaxiao.sources.bilibili import load_cookies_dict
+        return load_cookies_dict() or {}
+    except Exception as exc:      # 缺模块/读失败都降级, 不影响请求本身
+        log(f"⚠️ 读取登录 cookie 失败(降级为不带): {type(exc).__name__}")
+        return {}
+
+
+def cookie_header(guest_cookie, login_cookies=None):
+    """拼接 Cookie 头: 游客 buvid3/4 + 登录 cookie。纯函数, 便于离线测。"""
+    parts = [guest_cookie or ""]
+    for k, v in (login_cookies or {}).items():
+        if k:
+            parts.append(f"{k}={v}")
+    return "; ".join(p for p in parts if p)
+
+
 def _wbi_mixin_key():
     """nav -> wbi_img.img_url/sub_url -> 混淆出 mixin_key (未登录也能取到)"""
     status, text = _http_get(NAV_URL, {"User-Agent": UA,
@@ -192,7 +217,7 @@ def fetch_dynamics(cfg=None, uid=None, limit=None):
             "message": "未发起请求", "attempts": 0}
     try:
         _respect_gap(gap)
-        cookie = _buvid_cookies()
+        guest_cookie = _buvid_cookies()
         _respect_gap(gap)
         mixin = _wbi_mixin_key()
     except Exception as exc:
@@ -200,9 +225,12 @@ def fetch_dynamics(cfg=None, uid=None, limit=None):
         return last
 
     params = build_params(uid, limit)
+    login = _login_cookies()
     headers = {"User-Agent": UA,
                "Referer": f"https://space.bilibili.com/{uid}/dynamic",
-               "Cookie": cookie}
+               "Cookie": cookie_header(guest_cookie, login)}
+    if login:
+        log(f"🔑 动态请求带登录 cookie ({len(login)} 项)")
 
     for attempt in range(1, MAX_RETRIES + 2):
         _respect_gap(gap)
