@@ -2,6 +2,7 @@
 import datetime
 import os
 import re
+import time
 
 TS_RE = re.compile(r"^\s*(\d{1,2}:\d{2}(:\d{2})?)\s*$")
 
@@ -25,10 +26,57 @@ def read_text(path, default=""):
     except Exception:
         return default
 
+TMP_SUFFIX_RE = re.compile(r"\.tmp\.(\d+)$")
+
+
 def write_text(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+    """原子写: 先写同目录临时文件, fsync 后 os.replace 换上去。
+
+    进程被杀时主文件要么是旧版、要么是新版, **不会留半份**; 残留的
+    `<name>.tmp.<pid>` 只在 os.replace 之前被杀时出现, 说明那次写入没生效,
+    由 sweep_temp_files() 在下次启动时清掉 —— 不尝试从 tmp 恢复, 因为主文件
+    本身是完整的旧版。
+    """
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def sweep_temp_files(*dirs, min_age_seconds=600):
+    """清掉残留的 `*.tmp.<pid>`; 返回被清掉的路径列表。
+
+    只清「够旧」的: 另一个进程可能正在写自己的 tmp, 抢着删会打断它。
+    """
+    removed = []
+    now = time.time()
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        for name in os.listdir(d):
+            if not TMP_SUFFIX_RE.search(name):
+                continue
+            full = os.path.join(d, name)
+            try:
+                if now - os.path.getmtime(full) < min_age_seconds:
+                    continue
+                os.remove(full)
+                removed.append(full)
+            except OSError:
+                pass
+    return removed
 
 def norm_text(s):
     return CLEAN_RE.sub("", s)

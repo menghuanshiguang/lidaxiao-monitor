@@ -25,21 +25,6 @@ def report_date_of(path):
     return name if REPORT_DATE_RE.match(name) else ""
 
 
-def latest_report_date():
-    """reports/ 下最新一份日报的日期; 一份都没有返回 ""。
-
-    动态要落进**这次 run 处理的那份视频报告**, 而不是 `now()` 的日期:
-    线上 2026-11-24 02:37 那次处理的是 11-23 发布的视频, 报告是 2026-11-23.md,
-    按 now() 取日期会让动态另建一份 2026-11-24.md 平行骨架(只有摘要/清单空壳)。
-    本次没处理视频(早退路径)时退到最新一份日报; 一份都没有才由调用方用当天日期新建。
-    """
-    try:
-        names = os.listdir(os.path.join(WORKDIR, "reports"))
-    except OSError:
-        return ""
-    dates = sorted(d for d in (report_date_of(n) for n in names) if d)
-    return dates[-1] if dates else ""
-
 def parse_report(text):
     """解析报告 -> {summary_lines, list_lines, sections:{bvid:(start,end)}}"""
     res = {"summary_lines": [], "list_lines": [], "sections": {}}

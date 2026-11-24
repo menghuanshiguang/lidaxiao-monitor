@@ -52,7 +52,8 @@ except Exception:
 
 # monitor 自己只用 log/read_text/write_text; filter_ocr_text 与 norm_text 的唯一
 # 外部消费者 local/batch_subtitles.py 已改为从 lidaxiao.textutil 直接 import。
-from lidaxiao.textutil import log, read_text, write_text  # noqa: E402
+from lidaxiao.textutil import (  # noqa: E402
+    log, read_text, sweep_temp_files, write_text)
 
 
 from lidaxiao.config import (  # noqa: E402
@@ -266,7 +267,7 @@ from lidaxiao.vision import check_vision  # noqa: E402
 # 5. 每日报告
 # =====================================================================
 from lidaxiao.report.render import (  # noqa: E402
-    append_dynamics, build_section, ensure_disclaimer, latest_report_date,
+    append_dynamics, build_section, ensure_disclaimer,
     list_line, postprocess_analysis, report_date_of, upsert_report)
 
 
@@ -368,20 +369,17 @@ def process_video(cfg, api_key, video):
 
 
 def dynamics_target_date(touched, today=None):
-    """动态写进哪份日报 —— 顺序是硬约束:
+    """动态写进哪份日报 —— 两条规则:
 
-    1. 本次 run 处理过的视频报告(多份取日期最新那份)。线上 2026-11-24 02:37 那次
-       处理的是 11-23 发布的视频, 报告是 2026-11-23.md; 按 now() 取日期会让动态
-       另建一份 2026-11-24.md 平行骨架(只有 今日摘要/视频清单 空壳), 与视频报告分家。
-    2. 本次没处理视频(早退路径): reports/ 下最新一份日报。
-    3. 一份日报都没有: today(调用方新建当天文件)。
+    1. 本次 run 处理过视频: 用**那份视频报告**的日期(多份取最新)。线上 2026-11-24
+       02:37 那次处理的是 11-23 发布的视频, 报告是 2026-11-23.md; 按 now() 取日期
+       会另建一份 2026-11-24.md 平行骨架(只有 今日摘要/视频清单 空壳), 与视频报告分家。
+    2. 本次没处理视频(列表拿到了、只是没新视频): 用**今天**, 允许新建 —— 动态就是
+       当天发的, 不该往几天前的报告里塞。不往旧日报追加(按日期读就是错位内容)。
     """
     dates = sorted(d for d in (report_date_of(p) for p in (touched or [])) if d)
     if dates:
         return dates[-1]
-    latest = latest_report_date()
-    if latest:
-        return latest
     return today or datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
 
 
@@ -401,14 +399,20 @@ def process_dynamics(cfg, api_key, video_ok, touched=None):
     new = collected.get("new") or []
     if not new:
         return 0
+    # 硬约束: 视频列表没拿到 -> 一律不落盘、不推进 state。
+    # 必须由这个条件本身来拦, 不能靠 allow_create=False 或「报告文件在不在」:
+    # allow_create 只挡新建, 挡不住往已存在的旧报告里追加(验收员实测过:
+    # 「列表失败 + 旧报告存在」既写进旧报告、又推进 state 2 条)。
+    if not video_ok:
+        log(f"⚠️ 视频列表未拿到, 动态 {len(new)} 条本次不落盘、不推进 state(下次正常 run 再补)")
+        return 0
     entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
                for d in new]
     today = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
     date_str = dynamics_target_date(touched, today)
-    src = "本次处理的视频报告" if any(report_date_of(p) for p in (touched or [])) else (
-        "最新一份日报" if date_str != today else "当天(无日报可退)")
+    src = "本次处理的视频报告" if any(report_date_of(p) for p in (touched or [])) else "当天(没新视频)"
     log(f"ℹ️ 动态写入目标: reports/{date_str}.md (来源: {src})")
-    added = append_dynamics(date_str, entries, allow_create=video_ok)
+    added = append_dynamics(date_str, entries, allow_create=True)
     if added == len(new):
         commit_dynamics(cfg, new)
     else:
@@ -446,6 +450,10 @@ def main():
     lock = RunLock(os.path.join(WORKDIR, "data", "monitor.lock"))
     if not lock.acquire():
         return 0
+    # 中断残留识别: 进程若在 os.replace 之前被杀, 会留下 <name>.tmp.<pid> ——
+    # 主文件是完整的旧版, 那种 tmp 只是垃圾。拿锁后清掉够旧的(600s), 不抢正在写的。
+    for _leftover in sweep_temp_files(STATE_DIR, os.path.join(WORKDIR, "reports")):
+        log(f"🧹 清掉中断残留: {_leftover}")
     # 视频列表是否成功拿到: 只有拿到才允许动态去**新建**当日日报。
     # 列表拉取失败(return 1)那条路径也在 finally 里, 若它新建一份空日报,
     # 等于告诉读者"当天真的没有视频", 而真实情况是根本没拉到。

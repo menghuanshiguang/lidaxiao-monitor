@@ -35,7 +35,7 @@ import urllib.parse
 import urllib.request
 
 from lidaxiao.common import STATE_DIR
-from lidaxiao.textutil import log
+from lidaxiao.textutil import log, write_text
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -358,8 +358,8 @@ def save_seen(seen, cfg=None, last_id=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     payload = {"last_dynamic_id": str(last_id or ""),
                "ids": sorted({str(x) for x in (seen or [])})}
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False, indent=1)
+    # 原子写: 进程被杀时 state 要么是旧版要么是新版, 不会留半份 JSON 把下次判重带偏
+    write_text(path, json.dumps(payload, ensure_ascii=False, indent=1))
 
 
 def new_dynamics(cfg, items, seen=None):

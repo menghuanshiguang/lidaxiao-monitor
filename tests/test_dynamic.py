@@ -716,8 +716,8 @@ try:
     chk("动态目标日期: 多份报告取日期最新那份",
         M.dynamics_target_date([os.path.join(_wd, "reports", "2026-11-19.md"),
                                 os.path.join(_wd, "reports", "2026-11-21.md")]) == "2026-11-21")
-    chk("动态目标日期: 没处理视频时退到最新一份日报",
-        M.dynamics_target_date([], today="2026-11-24") == "2026-11-22")
+    chk("动态目标日期: 没处理视频时用今天(不往旧日报里塞)",
+        M.dynamics_target_date([], today="2026-11-24") == "2026-11-24")
     chk("动态目标日期: index.md / latest.md 不算日报",
         R.report_date_of(os.path.join(_wd, "reports", "latest.md")) == ""
         and R.report_date_of(os.path.join(_wd, "reports", "index.md")) == "")
@@ -726,7 +726,7 @@ finally:
 _empty_wd = tempfile.mkdtemp()
 R.WORKDIR = _empty_wd
 try:
-    chk("动态目标日期: 一份日报都没有才用当天",
+    chk("动态目标日期: 没有 touched 时一律当天, 与有无旧日报无关",
         M.dynamics_target_date([], today="2026-12-31") == "2026-12-31")
 finally:
     R.WORKDIR = _saved_wd
@@ -761,6 +761,121 @@ chk("线上形态: 报告目录只多出 0 个文件", _on_files == ["2026-11-23
 chk("线上形态: 视频节与动态节同在一份文件, 末行是声明",
     "## 视频1: 《一支》" in _on_txt
     and [l for l in _on_txt.splitlines() if l.strip()][-1] == R.DISCLAIMER)
+
+# ---------------------------------------------------------------- 落盘硬约束
+# ③ 视频列表失败: 由「列表失败」这个条件本身拦, 不靠 allow_create / 文件在不在。
+# 以前 allow_create=False 只挡新建, 挡不住往已存在的旧报告里追加(验收员实测:
+# 旧报告被写 + state 推进 2 条)。这里用真实 append_dynamics, 只桩掉抓取/分析/commit。
+def _run_pd(report_dir, video_ok, touched, items, commit_records):
+    R.report_path = lambda ds: os.path.join(report_dir, f"{ds}.md")
+    saved = (M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics)
+    M.collect_dynamics = lambda cfg: {"status": "ok", "new": items}
+    M.analyze_dynamic = lambda cfg, k, d: "看多"
+    M.commit_dynamics = lambda cfg, ds: commit_records.append([d["id_str"] for d in ds])
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            added = M.process_dynamics({"state_dir": tempfile.mkdtemp(),
+                                        "dynamic": {"enabled": True}},
+                                       "KEY", video_ok, touched)
+    finally:
+        M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics = saved
+    return added, buf.getvalue()
+
+
+print("== 落盘硬约束 ==")
+_old_dir = tempfile.mkdtemp()
+_old_rp = os.path.join(_old_dir, "2026-11-03.md")
+_old_text = ("# 📺 李大霄视频日报 2026-11-03\n\n## 今日摘要\n- 视频《旧》: 摘要\n\n"
+             "## 视频清单\n- [09:00] 旧 (BV1old00001)\n\n"
+             "## 视频1: 《旧》 (BV1old00001)\n\n【一句话摘要】旧\n\n"
+             + R.DISCLAIMER + "\n")
+with open(_old_rp, "w", encoding="utf-8") as fh:
+    fh.write(_old_text)
+_old_hash = hashlib.sha256(open(_old_rp, "rb").read()).hexdigest()
+_seen_before = sorted(os.listdir(_old_dir))
+_rec = []
+_added_fail, _log_fail = _run_pd(_old_dir, False, [], [opus_parsed, av_parsed], _rec)
+chk("列表失败+旧报告存在: 返回 0", _added_fail == 0, _added_fail)
+chk("列表失败+旧报告存在: 旧报告字节不变",
+    _old_hash == hashlib.sha256(open(_old_rp, "rb").read()).hexdigest())
+chk("列表失败+旧报告存在: 报告目录零新增", sorted(os.listdir(_old_dir)) == _seen_before,
+    sorted(os.listdir(_old_dir)))
+chk("列表失败+旧报告存在: 不推进 state", _rec == [], _rec)
+chk("列表失败+旧报告存在: 日志一行「不落盘」",
+    _log_fail.count("不落盘") == 1 and "不推进 state" in _log_fail, _log_fail.strip()[-160:])
+chk("列表失败: 不写 dynamics_seen.json",
+    not any("dynamics_seen" in x for x in os.listdir(_old_dir)))
+
+# ② 无新视频(列表拿到了) + 有动态 -> 新建当天文件, 不含「0 条」, 末行是声明
+_today_dir = tempfile.mkdtemp()
+with open(os.path.join(_today_dir, "2026-11-03.md"), "w", encoding="utf-8") as fh:
+    fh.write(_old_text)
+_rec2 = []
+_added_new, _log_new = _run_pd(_today_dir, True, [], [opus_parsed], _rec2)
+_today = M.dynamics_target_date([], None)
+chk("无新视频+有动态: 新建当天那份",
+    _added_new == 1 and os.path.exists(os.path.join(_today_dir, f"{_today}.md")),
+    (_added_new, sorted(os.listdir(_today_dir))))
+_today_txt = open(os.path.join(_today_dir, f"{_today}.md"), encoding="utf-8").read()
+chk("无新视频+有动态: 不含「0 条」类表述",
+    "0 条" not in _today_txt and "今日视频 0" not in _today_txt, _today_txt[:120])
+chk("无新视频+有动态: 末行是声明",
+    [l for l in _today_txt.splitlines() if l.strip()][-1] == R.DISCLAIMER)
+chk("无新视频+有动态: 没往旧报告里塞",
+    "## 李大霄动态" in _today_txt
+    and "## 李大霄动态" not in open(os.path.join(_today_dir, "2026-11-03.md"),
+                                    encoding="utf-8").read())
+chk("无新视频+有动态: state 推进 1 条", _rec2 == [[opus_parsed["id_str"]]], _rec2)
+
+# ---------------------------------------------------------------- 原子写 / 残留
+print("== 原子写 ==")
+from lidaxiao.textutil import sweep_temp_files, write_text as T_write
+_at = tempfile.mkdtemp()
+_tp = os.path.join(_at, "2026-11-24.md")
+T_write(_tp, "v1")
+T_write(_tp, "v2")
+chk("原子写后内容是最后的版本", open(_tp, encoding="utf-8").read() == "v2")
+chk("原子写不留 tmp", [x for x in os.listdir(_at) if ".tmp." in x] == [],
+    os.listdir(_at))
+_orig_replace = os.replace
+
+
+def _boom(a, b):
+    raise OSError("模拟写到一半被杀")
+
+
+os.replace = _boom
+try:
+    try:
+        T_write(_tp, "v3-should-not-land")
+    except OSError:
+        pass
+finally:
+    os.replace = _orig_replace
+chk("写失败时主文件仍是旧版(没有半份)", open(_tp, encoding="utf-8").read() == "v2")
+chk("写失败后 tmp 被清理", [x for x in os.listdir(_at) if ".tmp." in x] == [],
+    os.listdir(_at))
+# 残留识别: 够旧的 tmp 被清, 新鲜的留着(别抢正在写的)
+open(os.path.join(_at, "old.md.tmp.123"), "w").close()
+open(os.path.join(_at, "new.md.tmp.456"), "w").close()
+_old_ts = __import__("time").time() - 3600
+os.utime(os.path.join(_at, "old.md.tmp.123"), (_old_ts, _old_ts))
+_removed = sweep_temp_files(_at)
+chk("残留清扫只清够旧的", [os.path.basename(x) for x in _removed] == ["old.md.tmp.123"],
+    _removed)
+chk("新鲜 tmp 不被动", os.path.exists(os.path.join(_at, "new.md.tmp.456")))
+chk("普通文件不受影响", os.path.exists(_tp))
+
+# state 落盘也是原子写
+_sd = tempfile.mkdtemp()
+_scfg = {"state_dir": _sd, "dynamic": {"enabled": True}}
+D.save_seen({"a", "b"}, _scfg, last_id="b")
+_sp = D.seen_path(_scfg)
+chk("state 写出后无 tmp 残留", [x for x in os.listdir(_sd) if ".tmp." in x] == [],
+    os.listdir(_sd))
+chk("state 内容可读回", set(D.load_seen(_scfg)) == {"a", "b"}
+    and D.load_last_id(_scfg) == "b")
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

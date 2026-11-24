@@ -8,7 +8,7 @@ import re
 import time
 
 from lidaxiao.common import CN_TZ, STATE_DIR
-from lidaxiao.textutil import log
+from lidaxiao.textutil import log, write_text
 
 LOCK_STALE_SECONDS = 8 * 3600
 
@@ -103,8 +103,7 @@ def mark_processed(bvid, title, status):
                 if s.split("|", 1)[0].strip() != bvid:
                     keep.append(s)
     keep.append(line)
-    with open(p, "w", encoding="utf-8") as f:
-        f.write("\n".join(keep) + "\n")
+    write_text(p, "\n".join(keep) + "\n")          # 原子写: 被杀不留半份 processed.txt
 
 
 def processed_bvids():
