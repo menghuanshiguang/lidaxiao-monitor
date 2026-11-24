@@ -367,6 +367,32 @@ def process_video(cfg, api_key, video):
 
 
 
+def process_dynamics(cfg, api_key, video_ok):
+    """视频链路之后处理 B 站动态, 返回真正写进报告的条数。
+
+    顺序是硬约束, 不许颠倒: 抓取 -> 出简版 -> 追加报告 -> **报告写成功之后**才推进 state。
+    判重也不只靠 state: append_dynamics 按报告里的 <!-- dynamic:id --> 标记跳过。
+
+    state 只推进真正写进报告的那些条: 一条没写进去还推进, 那些动态就被永久标成
+    已处理、再也不会进报告(静默漏采)。视频列表失败时 allow_create=False,
+    append_dynamics 返回 0, 这里就一条都不推进。
+    """
+    collected = collect_dynamics(cfg)
+    new = collected.get("new") or []
+    if not new:
+        return 0
+    entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
+               for d in new]
+    date_str = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
+    added = append_dynamics(date_str, entries, allow_create=video_ok)
+    if added == len(new):
+        commit_dynamics(cfg, new)
+    else:
+        log(f"⚠️ 动态只写入 {added}/{len(new)} 条, 不推进 state "
+            f"(没落盘的不会标成已处理)")
+    return added
+
+
 def main():
     ap = argparse.ArgumentParser(description="李大霄视频自动监控分析系统")
     ap.add_argument("--force", action="store_true",
@@ -471,13 +497,7 @@ def main():
         #    反过来的话, 报告写失败会把动态永久标成已处理, 就是静默漏采换个位置重演。
         #    判重也不只靠 state: append_dynamics 按报告里的 <!-- dynamic:id --> 标记跳过。
         try:
-            _collected = collect_dynamics(cfg)
-            if _collected.get("new"):
-                _entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
-                            for d in _collected["new"]]
-                _date = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
-                append_dynamics(_date, _entries, allow_create=video_ok)
-                commit_dynamics(cfg, _collected["new"])   # 上一行没抛才推进
+            process_dynamics(cfg, api_key, video_ok)
         except Exception as exc:            # 兜底: 动态任何异常都不改上面的返回码
             log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
         lock.release()

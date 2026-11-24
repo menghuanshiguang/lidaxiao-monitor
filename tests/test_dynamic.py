@@ -263,6 +263,12 @@ chk("截断后正文不超过 400 字",
     len(shown))
 chk("短文本不截断", "截断" not in R.dynamic_md(av_parsed, "看多"))
 chk("有分析时出简版", "简版: 看多" in R.dynamic_md(av_parsed, "看多"))
+chk("模型自带「简版:」前缀不重复渲染",
+    R.dynamic_md(av_parsed, "简版: 看多").count("简版:") == 1,
+    R.dynamic_md(av_parsed, "简版: 看多"))
+chk("模型用全角冒号也不重复",
+    R.dynamic_md(av_parsed, "简版：看多").count("简版") == 1,
+    R.dynamic_md(av_parsed, "简版：看多"))
 chk("LLM 失败时标注未分析",
     R.DYNAMIC_UNAVAILABLE in R.dynamic_md(av_parsed, ""), R.dynamic_md(av_parsed, ""))
 chk("LLM 失败时原文仍在", "原文(" in R.dynamic_md(av_parsed, ""))
@@ -425,7 +431,36 @@ chk("视频写盘后动态标记仍在",
     after.count("<!-- dynamic:") == 2, after.count("<!-- dynamic:"))
 chk("视频写盘后视频节也在", "## 视频1: 《测试视频》" in after, after[:200])
 chk("动态节排在视频章节之后",
-    after.index("## 李大霄动态") > after.index("## 视频1: 《测试视频》"))
+    "## 李大霄动态" in after and "## 视频1: 《测试视频》" in after
+    and after.index("## 李大霄动态") > after.index("## 视频1: 《测试视频》"),
+    [l for l in after.splitlines() if l.startswith("## ")])
+
+# 两支视频 + 动态夹在中间(A 场景: 先写动态, 再陆续来两支视频)
+# 旧实现按任意 "## " 切块时, 动态会停在视频1 与视频2 之间; 必须是最后一节。
+repdir_a = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(repdir_a, f"{date_str}.md")
+day_a = "2026-11-26"
+R.append_dynamics(day_a, entries)
+_ts_a1 = int(_dt.datetime(2026, 11, 26, 9, 0,
+                          tzinfo=_dt.timezone(_dt.timedelta(hours=8))).timestamp())
+_ts_a2 = int(_dt.datetime(2026, 11, 26, 15, 0,
+                          tzinfo=_dt.timezone(_dt.timedelta(hours=8))).timestamp())
+R.upsert_report({"bvid": "BV1aa000001", "title": "第一支", "pubdate": _ts_a1},
+                "## 视频1: 《第一支》 (BV1aa000001)\n\n【一句话摘要】一\n",
+                "- 视频《第一支》: 摘要一", "- [09:00] 第一支 (BV1aa000001)")
+R.upsert_report({"bvid": "BV1bb000002", "title": "第二支", "pubdate": _ts_a2},
+                "## 视频1: 《第二支》 (BV1bb000002)\n\n【一句话摘要】二\n",
+                "- 视频《第二支》: 摘要二", "- [15:00] 第二支 (BV1bb000002)")
+a2 = R.read_text(R.report_path(day_a))
+_heads = [l for l in a2.splitlines() if l.startswith("## ")]
+chk("两支视频: 动态节仍在", "## 李大霄动态" in a2, _heads)
+chk("两支视频: 动态节是最后一节",
+    _heads and _heads[-1] == "## 李大霄动态", _heads)
+chk("两支视频: 动态标记仍在", a2.count("<!-- dynamic:") == 2, a2.count("<!-- dynamic:"))
+chk("两支视频: 两个视频节都在",
+    a2.count("## 视频") == 3 and "《第二支》" in a2, _heads)
+chk("两支视频: 动态没被夹在视频之间",
+    a2.index("## 李大霄动态") > a2.index("《第二支》"), _heads)
 
 # 只有视频的报告: 新实现必须与改动前逐字节一致(视频链路零变化)
 VIDEO_ONLY_A = """# 📺 李大霄视频日报 2026-11-24
@@ -469,6 +504,53 @@ added_no = R.append_dynamics("2026-11-25", entries, allow_create=False)
 chk("列表失败路径不新建日报", added_no == 0 and not os.path.exists(R.report_path("2026-11-25")))
 added_yes = R.append_dynamics("2026-11-25", entries, allow_create=True)
 chk("正常路径仍可新建", added_yes == 2 and os.path.exists(R.report_path("2026-11-25")))
+
+# ---------------------------------------------------------------- state 门禁
+# 「state 不许先于报告落盘」的编排侧钉桩: append_dynamics 没落盘就一条都不推进。
+import monitor as M
+
+_orig = (M.collect_dynamics, M.analyze_dynamic, M.append_dynamics, M.commit_dynamics)
+_saved = []
+try:
+    # (a) 视频列表失败那条路径: allow_create=False -> 落盘 0 条 -> state 一个字节都不许写
+    gate_dir = tempfile.mkdtemp()
+    gcfg = {"state_dir": gate_dir, "dynamic": {"enabled": True, "limit": 10}}
+    gseen = D.seen_path(gcfg)
+    M.collect_dynamics = lambda cfg: {"status": "ok", "new": [opus_parsed, av_parsed]}
+    M.analyze_dynamic = lambda cfg, key, d: ""
+    M.append_dynamics = lambda date_str, ents, allow_create=True: 0
+    M.commit_dynamics = lambda cfg, ds: _saved.append(list(ds))
+    got = M.process_dynamics(gcfg, "KEY", False)
+    chk("列表失败路径: 报告没落盘就一条都不推进", got == 0 and _saved == [], (got, _saved))
+    chk("列表失败路径: 不创建 state 文件", not os.path.exists(gseen))
+
+    # (b) 正常路径: added == len(new) 时 state 照常推进
+    ok_dir = tempfile.mkdtemp()
+    ocfg = {"state_dir": ok_dir, "dynamic": {"enabled": True, "limit": 10}}
+    M.append_dynamics = lambda date_str, ents, allow_create=True: len(ents)
+    got2 = M.process_dynamics(ocfg, "KEY", True)
+    chk("正常路径: 写全了就推进 state", got2 == 2 and len(_saved) == 1 and len(_saved[0]) == 2,
+        (got2, len(_saved)))
+finally:
+    (M.collect_dynamics, M.analyze_dynamic,
+     M.append_dynamics, M.commit_dynamics) = _orig
+
+# 上面 (b) 用的是真 commit_dynamics 吗? 不是 —— 再跑一遍不替换 commit, 证真 state 会落盘
+_real_commit = M.commit_dynamics
+try:
+    real_dir = tempfile.mkdtemp()
+    rcfg = {"state_dir": real_dir, "dynamic": {"enabled": True, "limit": 10}}
+    M.collect_dynamics = lambda cfg: {"status": "ok", "new": [opus_parsed, av_parsed]}
+    M.analyze_dynamic = lambda cfg, key, d: ""
+    M.append_dynamics = lambda date_str, ents, allow_create=True: len(ents)
+    M.commit_dynamics = D.commit_dynamics
+    got3 = M.process_dynamics(rcfg, "KEY", True)
+    chk("正常路径: 真实 commit 后 state 文件确实落盘",
+        got3 == 2 and os.path.exists(D.seen_path(rcfg))
+        and set(D.load_seen(rcfg)) == {opus_parsed["id_str"], av_parsed["id_str"]},
+        (got3, D.load_seen(rcfg)))
+finally:
+    M.collect_dynamics, M.analyze_dynamic, M.append_dynamics, M.commit_dynamics = _orig
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

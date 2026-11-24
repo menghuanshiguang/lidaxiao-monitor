@@ -292,6 +292,8 @@ def dynamic_md(dynamic, analysis=""):
              DYNAMIC_MARKER.format(d.get("id_str") or ""),
              f"原文({total} 字): {shown}"]
     brief = (analysis or "").strip()
+    # 模型自己爱以「简版:」开头, 不剥掉就会渲染成「简版: 简版: …」
+    brief = re.sub(r"^简\s*版\s*[:：]\s*", "", brief).strip()
     lines.append(f"简版: {brief}" if brief else f"简版: {DYNAMIC_UNAVAILABLE}")
     return "\n".join(lines)
 

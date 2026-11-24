@@ -212,11 +212,26 @@ def resort_report(text):
 
     sum_fill = [l for l in lines[idx["sum"] + 1:idx["list"]] if l.startswith("- ")]
     pre_list = [l for l in lines[idx["sum"] + 1:idx["list"]] if not l.startswith("- ")]
-    list_fill = [l for l in lines[idx["list"] + 1:] if l.startswith("- [")]
+    # 2.5) 清单之后按 "## " 切成三类块:
+    #      VIDEO    `## 视频N:`  —— 视频章节本体, 按时间排序并重编号
+    #      BODY     `## 视频…`(其它写法) / `## 【…】` —— 某支视频的正文小节,
+    #               必须跟着它上面那支视频走 (真实日报里【一句话摘要】等都属于此列)
+    #      STANDALONE 其它标题(如 `## 李大霄动态`) —— 独立小节, 原顺序保留在清单之后
+    # 清单直接跟正文行(无标题)的情况极少, 也算 STANDALONE, 一并保留。
+    VIDEO = re.compile(r"^##\s*视频\d*[:：]")
+    BODY = re.compile(r"^##\s*(?:视频|【)")
 
-    # 2.5) 清单之后: 按任意 "## " 标题切块 (视频块排序, 其它块原样保留)
+    # 清单项只在首个标题之前, 否则动态原文里以 "- [" 开头的行会被吸进视频清单
+    region = lines[idx["list"] + 1:]
+    first_head = len(region)
+    for i, ln in enumerate(region):
+        if ln.startswith("## "):
+            first_head = i
+            break
+    list_fill = [l for l in region[:first_head] if l.startswith("- [")]
+
     blocks, cur = [], None
-    for ln in lines[idx["list"] + 1:]:
+    for ln in region[first_head:]:
         if ln.startswith("## "):
             if cur is not None:
                 blocks.append(cur)
@@ -226,9 +241,19 @@ def resort_report(text):
     if cur is not None:
         blocks.append(cur)
 
-    is_video = lambda blk: bool(re.match(r"^##\s*视频\d*[:：]", blk[0]))
-    sections = [b for b in blocks if is_video(b)]
-    others = [b for b in blocks if not is_video(b)]
+    sections, standalones, prev = [], [], None
+    loose = [l for l in region[:first_head]
+             if l.strip() and not l.startswith("- [")]
+    if loose:
+        standalones.append(loose)
+    for blk in blocks:
+        if VIDEO.match(blk[0]):
+            sections.append(blk)
+            prev = sections[-1]
+        elif BODY.match(blk[0]) and prev is not None:
+            prev.extend(blk)      # 并入所属视频块, 与旧实现完全一致
+        else:
+            standalones.append(blk)
 
     def sec_key(block):
         m = re.search(r"\((BV\w+)\)", block[0])
@@ -257,13 +282,15 @@ def resort_report(text):
         out.pop()
     out.append("")
     out += out_secs
-    if others:
+    if standalones:
         while out and not out[-1].strip():
             out.pop()
-    for blk in others:
-        block = list(blk)
+    for blk in standalones:
+        block = [l for l in blk]
         while block and not block[-1].strip():
             block.pop()
+        while block and not block[0].strip():
+            block.pop(0)
         if not block:
             continue
         out += [""] + block
