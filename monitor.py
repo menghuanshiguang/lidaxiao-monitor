@@ -85,6 +85,8 @@ from lidaxiao.config import (  # noqa: E402
 from lidaxiao.sources.bilibili import (  # noqa: E402
     download_video, ensure_complete_download, fetch_video_info, find_downloaded_mp4,
     get_space_videos)
+# 动态监测: 与视频链路完全独立的一条支线, 失败只记日志
+from lidaxiao.sources.dynamic import process_dynamics  # noqa: E402
 
 
 # ---------------- B站 API (view 信息) ----------------
@@ -457,6 +459,12 @@ def main():
                 print(f"✅ 今日报告: {rp}")
         return 0
     finally:
+        # 6. 动态监测 (视频链路之后): 抓一页 -> 按 id_str 去重 -> 落 state。
+        # 失败只在 process_dynamics 里记一条日志, 不改上面的返回码, 不中断视频链路。
+        try:
+            process_dynamics(cfg)
+        except Exception as exc:            # process_dynamics 内部已兜底, 这里双保险
+            log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
         lock.release()
 
 

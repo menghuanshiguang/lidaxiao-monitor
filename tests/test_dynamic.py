@@ -13,9 +13,13 @@ fixture 来源见 tests/fixtures/dynamic/README.md —— 都是 2026-11-24 探�
 2. desc 恒为 null 的条目不能崩。
 3. 同一个 id_str 第二次不得重复产出。
 """
+import contextlib
+import hashlib
+import io
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lidaxiao.sources import dynamic as D
@@ -175,6 +179,76 @@ chk("签名带 wts 与 w_rid", "wts=1700000000" in q1 and "w_rid=" in q1, q1)
 chk("换密钥签名变化",
     D.sign_params({"host_mid": "1"}, "abd", wts=1700000000) != q1)
 chk("参数按 key 排序", q1.index("host_mid") < q1.index("wts"), q1)
+
+# ---------------------------------------------------------------- process_dynamics
+# 主流程入口: 失败一律只记日志、不写 state; 只有真拿到数据才落盘并记 last_dynamic_id
+def state_file(cfg):
+    return os.path.join(cfg["state_dir"], "seen_test.json")
+
+
+def run_process(cfg, fetched):
+    """替换网络层后跑一遍编排, 返回 (结果, 日志文本)"""
+    origin = D.fetch_dynamics
+    D.fetch_dynamics = lambda *a, **k: fetched
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            res = D.process_dynamics(cfg)
+    finally:
+        D.fetch_dynamics = origin
+    return res, buf.getvalue()
+
+
+tmpdir = tempfile.mkdtemp()
+tcfg = {"state_dir": tmpdir, "dynamic": {"enabled": True, "limit": 10}}
+seen_path = D.seen_path(tcfg)
+
+chk("无 state 文件时不报错", D.load_seen(tcfg) == [] and D.load_last_id(tcfg) == "")
+
+empty_result = D.classify_payload(empty)
+res_empty, log_empty = run_process(tcfg, empty_result)
+chk("空页: 状态记 empty", res_empty["status"] == "empty", res_empty["status"])
+chk("空页: 不写 state", not os.path.exists(seen_path))
+chk("空页: 日志有明确标记", "没拿到" in log_empty and "不写 state" in log_empty, log_empty.strip())
+
+risk_result = D.classify_payload(risk)
+res_risk, log_risk = run_process(tcfg, risk_result)
+chk("风控: 状态记 risk", res_risk["status"] == "risk", res_risk["status"])
+chk("风控: 不写 state", not os.path.exists(seen_path))
+chk("风控: 日志有标记", "没拿到" in log_risk, log_risk.strip())
+
+err_result = {"status": "error", "items": [], "code": None, "message": "boom"}
+res_err, log_err = run_process(tcfg, err_result)
+chk("异常: 状态记 error", res_err["status"] == "error", res_err["status"])
+chk("异常: 不写 state", not os.path.exists(seen_path))
+
+disabled, log_dis = run_process({"state_dir": tmpdir, "dynamic": {"enabled": False}}, empty_result)
+chk("禁用时不发请求", disabled["status"] == "disabled", disabled["status"])
+chk("禁用时不写 state", not os.path.exists(seen_path))
+chk("禁用时日志有标记", "已禁用" in log_dis, log_dis.strip())
+
+ok_page = D.classify_payload(opus_page)
+res_ok, log_ok = run_process(tcfg, ok_page)
+chk("拿到数据: 新增 2 条", len(res_ok["new"]) == 2, len(res_ok["new"]))
+chk("拿到数据: 写了 state", res_ok["seen_written"] is True and os.path.exists(seen_path))
+chk("state 里记了 last_dynamic_id",
+    D.load_last_id(tcfg) == res_ok["last_dynamic_id"] != "", D.load_last_id(tcfg))
+chk("state 里 ids 与新增一致",
+    set(D.load_seen(tcfg)) == {d["id_str"] for d in res_ok["new"]}, D.load_seen(tcfg))
+
+before = hashlib.sha256(open(seen_path, "rb").read()).hexdigest()
+res_again, _ = run_process(tcfg, ok_page)
+after = hashlib.sha256(open(seen_path, "rb").read()).hexdigest()
+chk("同一页第二次: 无新增", res_again["new"] == [], len(res_again["new"]))
+chk("同一页第二次: state 字节不变", before == after, f"{before[:12]} != {after[:12]}")
+chk("同一页第二次: last_dynamic_id 保持",
+    D.load_last_id(tcfg) == res_ok["last_dynamic_id"], D.load_last_id(tcfg))
+
+# 旧格式(纯数组)落盘也要能读回, 避免升级后把已见记录当空
+with open(seen_path, "w", encoding="utf-8") as fh:
+    json.dump(["1", "2"], fh)
+chk("兼容旧的纯数组 state", D.load_seen(tcfg) == ["1", "2"], D.load_seen(tcfg))
+chk("纯数组格式下 last_id 为空", D.load_last_id(tcfg) == "")
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
