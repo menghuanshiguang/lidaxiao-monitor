@@ -14,6 +14,7 @@ fixture 来源见 tests/fixtures/dynamic/README.md —— 都是 2026-11-24 探�
 3. 同一个 id_str 第二次不得重复产出。
 """
 import contextlib
+import glob
 import hashlib
 import io
 import json
@@ -496,6 +497,21 @@ VIDEO_ONLY_B = """# 📺 李大霄视频日报 2026-11-24
 for name, sample in (("两视频乱序", VIDEO_ONLY_A), ("单视频", VIDEO_ONLY_B)):
     chk(f"视频链路零变化: {name}", A.resort_report(sample) == _legacy_resort(sample))
 chk("resort 幂等", A.resort_report(A.resort_report(VIDEO_ONLY_A)) == A.resort_report(VIDEO_ONLY_A))
+
+# 真实日报全量对拍: 视频链路零变化不能只靠上面两份构造样本。
+# 真实日报在清单之后用的是 `## 【一句话摘要】` 这类**视频正文小节**, 它们必须并回
+# 所属视频块; 一旦块边界放宽(把任意 "## " 当边界), 标题会与视频脱钩、挤到所有视频之后。
+_rep_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "docs", "reports")
+_real = sorted(glob.glob(os.path.join(_rep_dir, "*.md")))
+_bad = []
+for _p in _real:
+    _t = open(_p, encoding="utf-8").read()
+    if A.resort_report(_t) != _legacy_resort(_t):
+        _bad.append(os.path.basename(_p))
+chk(f"真实日报 {len(_real)} 份与旧实现逐字节相同", _real and not _bad, _bad[:5])
+chk("真实日报含视频正文小节(否则上一条是空转)",
+    any("## 【一句话摘要】" in open(_p, encoding="utf-8").read() for _p in _real))
 
 # 视频列表没拉到 -> 不许新建当日日报
 repdir3 = tempfile.mkdtemp()
