@@ -263,6 +263,18 @@ chk("截断后正文不超过 400 字",
     len(shown.split(": ", 1)[1].split("…(截断")[0]) <= R.DYNAMIC_TEXT_LIMIT,
     len(shown))
 chk("短文本不截断", "截断" not in R.dynamic_md(av_parsed, "看多"))
+# id / 时间 / 原文必须来自**同一条**条目: 手拼 dict(拿 A 条的 pub_ts 配 B 条的正文)
+# 会让报告出现「同一 id、两个时间」, 阶段 4 验收时就被这坑绊过一次。
+import datetime as _dtz
+_mt = R.dynamic_md(opus_parsed).splitlines()
+chk("### 行时间取本条自己的 pub_ts",
+    _mt[0] == "### 2026-11-22 20:07 · 长文动态", _mt[0])
+chk("原文与 id 对应(开头是这条 opus 的真实正文)",
+    _mt[2].startswith("原文(813 字): 李大霄：救市组合拳有助于加速市场稳定"), _mt[2][:48])
+chk("opus 与 AV 两条的 pub_ts 各自独立",
+    _dtz.datetime.fromtimestamp(opus_parsed["pub_ts"], R.CN_TZ).strftime("%Y-%m-%d %H:%M") == "2026-11-22 20:07"
+    and _dtz.datetime.fromtimestamp(av_parsed["pub_ts"], R.CN_TZ).strftime("%Y-%m-%d %H:%M") == "2026-08-30 21:10",
+    (opus_parsed.get("pub_ts"), av_parsed.get("pub_ts")))
 chk("有分析时出简版", "简版: 看多" in R.dynamic_md(av_parsed, "看多"))
 chk("模型自带「简版:」前缀不重复渲染",
     R.dynamic_md(av_parsed, "简版: 看多").count("简版:") == 1,
