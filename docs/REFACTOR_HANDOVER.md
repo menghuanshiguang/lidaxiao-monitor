@@ -226,6 +226,11 @@ common → textutil → prompts → ocr → sources → analyze → report → m
 
 口径：`created_at` 减去当天该格的 cron 时刻。cron 定义自 **2026-08-15** 起就是 `40 6 * * *` / `0 12 * * *`（`git log` 里 cron 行只在 08-14 建 5 格、08-15 改成 2 格动过），所以这 15 天用的同一组 cron，延迟可直接比较。延迟不是固定值，逐日漂移，**不能靠「加一个固定偏移」修正**；这就是把 cron 改成 `0 */3 * * *` 的依据。
 
+### 6.2 还没定死的两件事（别在报告里含糊过去）
+
+- **`45342183969`（`2026-11-24T06:40:19Z` = CN 14:40:19）的派发来源至今未定，但可确定不是 cron**：`event=workflow_dispatch`、`actor=triggering_actor=menghuanshiguang`。总策划用自己的派发时刻表（03:05–03:22Z）排除；大肥鱼用 DSH 定时任务的创建时刻排除——三条任务最早建于 `10:38:00Z`，比它晚约 3 小时 58 分。全员共用同一个 token，GitHub 也不暴露 dispatch 的来源 IP，仓库里 4 个 workflow `grep dispatches` 无命中，所以只能记为「来源未定，非 cron」。要追只能查当时跑过 `curl` 的那个 shell。
+- **「`0 */3 * * *` 名义 8 次/天，但在 6–12 小时延迟下很可能只收到两三条」是推测，未实测**：`concurrency` 只保留一个 pending、后来的会顶掉前一个，密度提高不等于 run 数线性增加。判定只看真实 `event=schedule` 的连续记录（每出现一条记一行：真实 `created_at` + 对应 cron 格 + 迟到小时数）；在它出现之前，不许写「cron 高频化有效」。
+
 ---
 
 ## 7. 验收标准（本轮逐条达成，证据位置在右）
