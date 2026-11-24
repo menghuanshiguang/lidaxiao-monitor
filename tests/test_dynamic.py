@@ -324,6 +324,13 @@ chk("空正文动态不调用 LLM", L.analyze_dynamic({}, None, {"id_str": "1"})
 A = __import__("lidaxiao.audit", fromlist=["audit"])
 
 # 改动前 resort_report 的原样副本: 只用来证「视频链路输出零变化」
+def _ordered(txt, first, second, first_last=False, second_last=False):
+    """first 出现在 second 之前吗; 任一方缺失返回 False, 不抛异常。"""
+    a = txt.rfind(first) if first_last else txt.find(first)
+    b = txt.rfind(second) if second_last else txt.find(second)
+    return a >= 0 and b >= 0 and a < b
+
+
 def _legacy_resort(text):
     """BUG-12 排序统一: 今日摘要 / 视频清单 / 正文章节 统一按发布时间升序。"""
     if not text:
@@ -432,8 +439,7 @@ chk("视频写盘后动态标记仍在",
     after.count("<!-- dynamic:") == 2, after.count("<!-- dynamic:"))
 chk("视频写盘后视频节也在", "## 视频1: 《测试视频》" in after, after[:200])
 chk("动态节排在视频章节之后",
-    "## 李大霄动态" in after and "## 视频1: 《测试视频》" in after
-    and after.index("## 李大霄动态") > after.index("## 视频1: 《测试视频》"),
+    _ordered(after, "## 视频1: 《测试视频》", "## 李大霄动态"),
     [l for l in after.splitlines() if l.startswith("## ")])
 
 # 两支视频 + 动态夹在中间(A 场景: 先写动态, 再陆续来两支视频)
@@ -454,14 +460,91 @@ R.upsert_report({"bvid": "BV1bb000002", "title": "第二支", "pubdate": _ts_a2}
                 "- 视频《第二支》: 摘要二", "- [15:00] 第二支 (BV1bb000002)")
 a2 = R.read_text(R.report_path(day_a))
 _heads = [l for l in a2.splitlines() if l.startswith("## ")]
+_tail = [l for l in a2.splitlines() if l.strip()][-1]
 chk("两支视频: 动态节仍在", "## 李大霄动态" in a2, _heads)
-chk("两支视频: 动态节是最后一节",
-    _heads and _heads[-1] == "## 李大霄动态", _heads)
+chk("两支视频: 动态节在视频章节之后、免责声明之前",
+    "## 李大霄动态" in a2 and "## 视频1: 《第一支》" in a2 and "## 视频2: 《第二支》" in a2
+    and _ordered(a2, "## 视频2: 《第二支》", "## 李大霄动态")
+    and _ordered(a2, "## 李大霄动态", R.DISCLAIMER, second_last=True),
+    _heads)
+chk("两支视频: 末行仍是免责声明", _tail == R.DISCLAIMER, _tail)
+chk("两支视频: 声明只有一条", a2.count(R.DISCLAIMER) == 1, a2.count(R.DISCLAIMER))
 chk("两支视频: 动态标记仍在", a2.count("<!-- dynamic:") == 2, a2.count("<!-- dynamic:"))
 chk("两支视频: 两个视频节都在",
     a2.count("## 视频") == 3 and "《第二支》" in a2, _heads)
 chk("两支视频: 动态没被夹在视频之间",
-    a2.index("## 李大霄动态") > a2.index("《第二支》"), _heads)
+    _ordered(a2, "《第二支》", "## 李大霄动态"), _heads)
+# 幂等: 位置变了, 标记判重仍须生效(第二次不写, 字节不变)
+_snap_a = hashlib.sha256(open(R.report_path(day_a), "rb").read()).hexdigest()
+_added_a = R.append_dynamics(day_a, entries)
+chk("两支视频: 同 id 再追加不写入", _added_a == 0, _added_a)
+chk("两支视频: 再追加后报告字节不变",
+    _snap_a == hashlib.sha256(open(R.report_path(day_a), "rb").read()).hexdigest())
+chk("两支视频: 再追加后末行仍声明",
+    [l for l in R.read_text(R.report_path(day_a)).splitlines() if l.strip()][-1]
+    == R.DISCLAIMER)
+
+# 新建日报(当天没新视频, 由动态建文件): 必须含且仅含一条声明, 且声明是末行
+_nd = "2026-11-27"
+_nd_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_nd_dir, f"{date_str}.md")
+R.append_dynamics(_nd, entries)
+_ndtxt = R.read_text(R.report_path(_nd))
+chk("新建日报: 含且仅含一条免责声明", _ndtxt.count(R.DISCLAIMER) == 1,
+    _ndtxt.count(R.DISCLAIMER))
+chk("新建日报: 末行是免责声明",
+    [l for l in _ndtxt.splitlines() if l.strip()][-1] == R.DISCLAIMER,
+    [l for l in _ndtxt.splitlines() if l.strip()][-1])
+chk("新建日报: 动态标记齐全", _ndtxt.count("<!-- dynamic:") == 2,
+    _ndtxt.count("<!-- dynamic:"))
+
+# 已有日报(结尾是免责声明, 像真实视频日报那样)追加动态:
+# 插入点必须是声明之前, 声明仍是末行 —— 这是最容易被写回 EOF 追加的分支。
+_ex_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_ex_dir, f"{date_str}.md")
+_ex_day = "2026-11-29"
+_ex_text = ("# 📺 李大霄视频日报 2026-11-29\n\n"
+            "## 今日摘要\n- 视频《一支》: 摘要\n\n"
+            "## 视频清单\n- [09:00] 一支 (BV1ex00001)\n\n"
+            "## 视频1: 《一支》 (BV1ex00001)\n\n【一句话摘要】一\n\n"
+            + R.DISCLAIMER + "\n")
+with open(R.report_path(_ex_day), "w", encoding="utf-8") as fh:
+    fh.write(_ex_text)
+_ex_added = R.append_dynamics(_ex_day, entries)
+_ex_txt = R.read_text(R.report_path(_ex_day))
+_ex_nb = [l for l in _ex_txt.splitlines() if l.strip()]
+chk("已有日报追加: 写入条数", _ex_added == 2, _ex_added)
+chk("已有日报追加: 动态节在声明之前",
+    _ordered(_ex_txt, "## 李大霄动态", R.DISCLAIMER, second_last=True), _ex_nb[-3:])
+chk("已有日报追加: 末行仍是免责声明", _ex_nb[-1] == R.DISCLAIMER, _ex_nb[-1])
+chk("已有日报追加: 声明没有被重复追加", _ex_txt.count(R.DISCLAIMER) == 1,
+    _ex_txt.count(R.DISCLAIMER))
+chk("已有日报追加: 声明在动态内容之后",
+    _ordered(_ex_txt, "<!-- dynamic:", R.DISCLAIMER,
+             first_last=True, second_last=True), _ex_nb[-3:])
+
+# 未知顶层节: 反向枚举的代价是位置可能靠后, 但绝不许丢内容
+_unknown = """# 📺 李大霄视频日报 2026-11-28
+
+## 今日摘要
+- 视频《一支》: 摘要
+
+## 视频清单
+- [09:00] 一支 (BV1unk0001)
+
+## 视频1: 《一支》 (BV1unk0001)
+
+【一句话摘要】一支
+
+## 本周总结
+
+本周主线: 稳市组合拳。
+"""
+_u_out = A.resort_report(_unknown)
+chk("未知节不丢弃", "## 本周总结" in _u_out and "本周主线: 稳市组合拳。" in _u_out,
+    _u_out[-200:])
+chk("未知节排在视频章节之后",
+    _ordered(_u_out, "## 视频1: 《一支》", "## 本周总结"), _u_out[-200:])
 
 # 只有视频的报告: 新实现必须与改动前逐字节一致(视频链路零变化)
 VIDEO_ONLY_A = """# 📺 李大霄视频日报 2026-11-24

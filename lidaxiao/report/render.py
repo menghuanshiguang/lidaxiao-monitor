@@ -298,23 +298,53 @@ def dynamic_md(dynamic, analysis=""):
     return "\n".join(lines)
 
 
+def _disclaimer_line(text):
+    """免责声明所在行号(0 基, 取**最后一次**出现); 找不到返回 -1。
+
+    定位一律复用 find_disclaimer, 不另写一套匹配 —— 那里已经处理了模型把半角逗号
+    写成全角「，」的变体, 另写一套必然会和它不一致。
+    """
+    at = find_disclaimer(text)
+    if at < 0:
+        return -1
+    return text[:at].count("\n")
+
+
 def _insert_dynamic_blocks(text, blocks):
-    """插入到已有「## 李大霄动态」小节末尾; 没有该小节则追加到文末"""
+    """插入「## 李大霄动态」小节: 在视频章节之后、**免责声明之前**。
+
+    版面硬约束(阶段 4): 免责声明必须是报告最后一行。所以插入点不是 EOF, 而是
+    声明所在行之前; 报告里没有声明时, 先用 ensure_disclaimer 补一条标准声明,
+    动态节插在它之前 —— 两条路径都保证声明收尾且只有一条声明。
+    """
     block = "\n\n".join(blocks)
     lines = text.splitlines()
+    d = _disclaimer_line(text)
     idx = next((i for i, ln in enumerate(lines)
                 if ln.strip() == DYNAMIC_SECTION), None)
-    if idx is None:
-        return text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block + "\n"
-    end = len(lines)
-    for j in range(idx + 1, len(lines)):
-        if lines[j].startswith("## "):
-            end = j
-            break
-    head, tail = lines[:end], lines[end:]
+    if idx is not None:
+        end = len(lines)
+        for j in range(idx + 1, len(lines)):
+            if lines[j].startswith("## "):
+                end = j
+                break
+        if d >= 0 and idx < d < end:      # 动态节之后紧跟声明: 别把新块插到声明后面
+            end = d
+        head, tail = lines[:end], lines[end:]
+        while head and not head[-1].strip():
+            head.pop()
+        out = "\n".join(head) + "\n\n" + block + "\n"
+        if tail:
+            out += "\n" + "\n".join(tail).lstrip("\n") + "\n"
+        return out
+    if d < 0:
+        # 新建日报(或报告里根本没有声明): 动态节先落, 再补标准声明收尾
+        out = text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block
+        return ensure_disclaimer(out) + "\n"
+    head, tail = lines[:d], lines[d:]
     while head and not head[-1].strip():
         head.pop()
-    out = "\n".join(head) + "\n\n" + block + "\n"
+    out = "\n".join(head) + "\n\n" + DYNAMIC_SECTION + "\n\n" + block + "\n"
     if tail:
         out += "\n" + "\n".join(tail).lstrip("\n") + "\n"
     return out
