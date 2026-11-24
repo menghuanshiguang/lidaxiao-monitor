@@ -24,6 +24,7 @@
 退出码: 0=正常(含无更新)  1=出错
 """
 import argparse
+import datetime
 import os
 import sys
 import time
@@ -31,7 +32,7 @@ import time
 # ---------- 常量 ----------
 # 只用 monitor 自己真要用的常量。CN_TZ/DISCLAIMER/FFMPEG_DIR/FFPROBE 在 monitor 内
 # 已无引用, 外部消费者 (bench/run_bench.py 的 m.CN_TZ) 已改从 lidaxiao.common 直接 import。
-from lidaxiao.common import STATE_DIR, WORKDIR  # noqa: E402
+from lidaxiao.common import CN_TZ, STATE_DIR, WORKDIR  # noqa: E402
 
 try:
     from lidaxiao import audit as _audit
@@ -86,7 +87,8 @@ from lidaxiao.sources.bilibili import (  # noqa: E402
     download_video, ensure_complete_download, fetch_video_info, find_downloaded_mp4,
     get_space_videos)
 # 动态监测: 与视频链路完全独立的一条支线, 失败只记日志
-from lidaxiao.sources.dynamic import process_dynamics  # noqa: E402
+from lidaxiao.sources.dynamic import (  # noqa: E402
+    collect_dynamics, commit_dynamics)
 
 
 # ---------------- B站 API (view 信息) ----------------
@@ -199,7 +201,7 @@ from lidaxiao.vision.ending import read_ending_hint  # noqa: E402
 # 只留 monitor 自己要调的两个。_apply_thinking/_warn_model/build_dsc_prompt/call_llm/
 # tighten_analysis/validate_report 在 monitor 内均无调用点: call_llm 的消费者
 # _setup/weekly_summary.py、validate_report 的消费者 bench/legacy/* 已改为直接 import。
-from lidaxiao.analyze.llm import analyze_subtitles, load_history  # noqa: E402
+from lidaxiao.analyze.llm import analyze_dynamic, analyze_subtitles, load_history  # noqa: E402
 # check_vision 随视觉通道搬去 vision/, analyze 不再导出它
 from lidaxiao.vision import check_vision  # noqa: E402
 
@@ -264,8 +266,8 @@ from lidaxiao.vision import check_vision  # noqa: E402
 # 5. 每日报告
 # =====================================================================
 from lidaxiao.report.render import (  # noqa: E402
-    build_section, ensure_disclaimer, list_line, postprocess_analysis,
-    upsert_report)
+    append_dynamics, build_section, ensure_disclaimer, list_line,
+    postprocess_analysis, upsert_report)
 
 
 
@@ -459,11 +461,19 @@ def main():
                 print(f"✅ 今日报告: {rp}")
         return 0
     finally:
-        # 6. 动态监测 (视频链路之后): 抓一页 -> 按 id_str 去重 -> 落 state。
-        # 失败只在 process_dynamics 里记一条日志, 不改上面的返回码, 不中断视频链路。
+        # 6. 动态监测 (视频链路之后)。顺序是硬约束, 不许颠倒:
+        #    抓取 -> 出简版 -> 追加报告 -> **报告写成功之后**才推进 state。
+        #    反过来的话, 报告写失败会把动态永久标成已处理, 就是静默漏采换个位置重演。
+        #    判重也不只靠 state: append_dynamics 按报告里的 <!-- dynamic:id --> 标记跳过。
         try:
-            process_dynamics(cfg)
-        except Exception as exc:            # process_dynamics 内部已兜底, 这里双保险
+            _collected = collect_dynamics(cfg)
+            if _collected.get("new"):
+                _entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
+                            for d in _collected["new"]]
+                _date = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
+                append_dynamics(_date, _entries)
+                commit_dynamics(cfg, _collected["new"])   # 上一行没抛才推进
+        except Exception as exc:            # 兜底: 动态任何异常都不改上面的返回码
             log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
         lock.release()
 

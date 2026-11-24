@@ -180,20 +180,15 @@ chk("换密钥签名变化",
     D.sign_params({"host_mid": "1"}, "abd", wts=1700000000) != q1)
 chk("参数按 key 排序", q1.index("host_mid") < q1.index("wts"), q1)
 
-# ---------------------------------------------------------------- process_dynamics
-# 主流程入口: 失败一律只记日志、不写 state; 只有真拿到数据才落盘并记 last_dynamic_id
-def state_file(cfg):
-    return os.path.join(cfg["state_dir"], "seen_test.json")
-
-
-def run_process(cfg, fetched):
-    """替换网络层后跑一遍编排, 返回 (结果, 日志文本)"""
+# ---------------------------------------------------------------- 编排层
+# 顺序硬约束: collect(只读, 不写 state) -> 渲染 -> 报告写成功 -> commit(state)
+def run_collect(cfg, fetched):
     origin = D.fetch_dynamics
     D.fetch_dynamics = lambda *a, **k: fetched
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            res = D.process_dynamics(cfg)
+            res = D.collect_dynamics(cfg)
     finally:
         D.fetch_dynamics = origin
     return res, buf.getvalue()
@@ -205,50 +200,117 @@ seen_path = D.seen_path(tcfg)
 
 chk("无 state 文件时不报错", D.load_seen(tcfg) == [] and D.load_last_id(tcfg) == "")
 
-empty_result = D.classify_payload(empty)
-res_empty, log_empty = run_process(tcfg, empty_result)
-chk("空页: 状态记 empty", res_empty["status"] == "empty", res_empty["status"])
-chk("空页: 不写 state", not os.path.exists(seen_path))
-chk("空页: 日志有明确标记", "没拿到" in log_empty and "不写 state" in log_empty, log_empty.strip())
+for name, payload in (("空页", empty), ("风控", risk)):
+    res, logtxt = run_collect(tcfg, D.classify_payload(payload))
+    chk(f"{name}: new 为空", res["new"] == [], res["new"])
+    chk(f"{name}: 不写 state", not os.path.exists(seen_path))
+    chk(f"{name}: 日志有标记", "没拿到" in logtxt and "不写 state" in logtxt, logtxt.strip())
 
-risk_result = D.classify_payload(risk)
-res_risk, log_risk = run_process(tcfg, risk_result)
-chk("风控: 状态记 risk", res_risk["status"] == "risk", res_risk["status"])
-chk("风控: 不写 state", not os.path.exists(seen_path))
-chk("风控: 日志有标记", "没拿到" in log_risk, log_risk.strip())
+res_err, _ = run_collect(tcfg, {"status": "error", "items": [], "code": None, "message": "boom"})
+chk("异常: new 为空且不写 state", res_err["new"] == [] and not os.path.exists(seen_path))
 
-err_result = {"status": "error", "items": [], "code": None, "message": "boom"}
-res_err, log_err = run_process(tcfg, err_result)
-chk("异常: 状态记 error", res_err["status"] == "error", res_err["status"])
-chk("异常: 不写 state", not os.path.exists(seen_path))
-
-disabled, log_dis = run_process({"state_dir": tmpdir, "dynamic": {"enabled": False}}, empty_result)
-chk("禁用时不发请求", disabled["status"] == "disabled", disabled["status"])
-chk("禁用时不写 state", not os.path.exists(seen_path))
-chk("禁用时日志有标记", "已禁用" in log_dis, log_dis.strip())
+res_dis, log_dis = run_collect({"state_dir": tmpdir, "dynamic": {"enabled": False}}, empty)
+chk("禁用: 状态 disabled", res_dis["status"] == "disabled", res_dis["status"])
+chk("禁用: 不写 state", not os.path.exists(seen_path))
 
 ok_page = D.classify_payload(opus_page)
-res_ok, log_ok = run_process(tcfg, ok_page)
-chk("拿到数据: 新增 2 条", len(res_ok["new"]) == 2, len(res_ok["new"]))
-chk("拿到数据: 写了 state", res_ok["seen_written"] is True and os.path.exists(seen_path))
-chk("state 里记了 last_dynamic_id",
-    D.load_last_id(tcfg) == res_ok["last_dynamic_id"] != "", D.load_last_id(tcfg))
+res_ok, _ = run_collect(tcfg, ok_page)
+chk("拿到数据: 待处理 2 条", len(res_ok["new"]) == 2, len(res_ok["new"]))
+chk("collect 自己不写 state(留给报告成功后)", not os.path.exists(seen_path))
+
+last = D.commit_dynamics(tcfg, res_ok["new"])
+chk("commit 后才有 state", os.path.exists(seen_path))
+chk("state 记了 last_dynamic_id", last == D.load_last_id(tcfg) != "", last)
 chk("state 里 ids 与新增一致",
-    set(D.load_seen(tcfg)) == {d["id_str"] for d in res_ok["new"]}, D.load_seen(tcfg))
+    set(D.load_seen(tcfg)) == {d["id_str"] for d in res_ok["new"]})
+chk("commit 空列表不改 state", D.commit_dynamics(tcfg, []) == last)
 
 before = hashlib.sha256(open(seen_path, "rb").read()).hexdigest()
-res_again, _ = run_process(tcfg, ok_page)
+res_again, _ = run_collect(tcfg, ok_page)
+chk("同一页第二次: 无新增", res_again["new"] == [])
 after = hashlib.sha256(open(seen_path, "rb").read()).hexdigest()
-chk("同一页第二次: 无新增", res_again["new"] == [], len(res_again["new"]))
-chk("同一页第二次: state 字节不变", before == after, f"{before[:12]} != {after[:12]}")
-chk("同一页第二次: last_dynamic_id 保持",
-    D.load_last_id(tcfg) == res_ok["last_dynamic_id"], D.load_last_id(tcfg))
+chk("同一页第二次: state 字节不变", before == after)
 
-# 旧格式(纯数组)落盘也要能读回, 避免升级后把已见记录当空
 with open(seen_path, "w", encoding="utf-8") as fh:
     json.dump(["1", "2"], fh)
-chk("兼容旧的纯数组 state", D.load_seen(tcfg) == ["1", "2"], D.load_seen(tcfg))
+chk("兼容旧的纯数组 state", D.load_seen(tcfg) == ["1", "2"])
 chk("纯数组格式下 last_id 为空", D.load_last_id(tcfg) == "")
+
+# ---------------------------------------------------------------- 报告一节
+R = D and __import__("lidaxiao.report.render", fromlist=["render"])
+repdir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(repdir, f"{date_str}.md")
+today = "2026-11-24"
+
+opus_parsed = D.parse_dynamic(raw_opus)
+av_parsed = D.parse_dynamic(raw_opus_av)
+chk("dynamic_md 有四级标题(时间·类型)",
+    R.dynamic_md(opus_parsed).splitlines()[0].startswith("### 2026-")
+    and "长文动态" in R.dynamic_md(opus_parsed).splitlines()[0],
+    R.dynamic_md(opus_parsed).splitlines()[0])
+chk("dynamic_md 带幂等标记",
+    f"<!-- dynamic:{opus_parsed['id_str']} -->" in R.dynamic_md(opus_parsed))
+chk("dynamic_md 原文按字符截断到 400",
+    "原文(813 字): " in R.dynamic_md(opus_parsed)          # 814 原始 - 首尾空白 = 813
+    and "截断, 原文 813 字" in R.dynamic_md(opus_parsed),
+    [l for l in R.dynamic_md(opus_parsed).splitlines() if l.startswith("原文(")])
+chk("截断只保留前 400 字, 不是全篇",
+    "1）降低融资门槛" in R.dynamic_md(opus_parsed))
+shown = [l for l in R.dynamic_md(opus_parsed).splitlines() if l.startswith("原文(")][0]
+chk("截断后正文不超过 400 字",
+    len(shown.split(": ", 1)[1].split("…(截断")[0]) <= R.DYNAMIC_TEXT_LIMIT,
+    len(shown))
+chk("短文本不截断", "截断" not in R.dynamic_md(av_parsed, "看多"))
+chk("有分析时出简版", "简版: 看多" in R.dynamic_md(av_parsed, "看多"))
+chk("LLM 失败时标注未分析",
+    R.DYNAMIC_UNAVAILABLE in R.dynamic_md(av_parsed, ""), R.dynamic_md(av_parsed, ""))
+chk("LLM 失败时原文仍在", "原文(" in R.dynamic_md(av_parsed, ""))
+
+entries = [{"dynamic": opus_parsed, "analysis": "看多, 依据降准"},
+           {"dynamic": av_parsed, "analysis": ""}]
+added = R.append_dynamics(today, entries)
+rp = R.report_path(today)
+chk("首次追加 2 条", added == 2, added)
+body = open(rp, encoding="utf-8").read()
+chk("报告出现 ## 李大霄动态", "## 李大霄动态" in body)
+chk("报告有两个动态块", body.count("<!-- dynamic:") == 2, body.count("<!-- dynamic:"))
+chk("报告保留原头部", body.startswith("# 📺 李大霄视频日报 2026-11-24"))
+
+# 崩溃窗口: 报告已写、state 丢失, 重跑不得重复追加
+snapshot = hashlib.sha256(open(rp, "rb").read()).hexdigest()
+added2 = R.append_dynamics(today, entries)
+chk("同 id 第二次不重复追加", added2 == 0, added2)
+chk("崩溃窗口重跑: 报告字节不变",
+    snapshot == hashlib.sha256(open(rp, "rb").read()).hexdigest())
+
+added3 = R.append_dynamics(today, [{"dynamic": opus_parsed, "analysis": "再来一次"}])
+chk("同一条单独再跑也不追加", added3 == 0, added3)
+
+# ---------------------------------------------------------------- LLM 降级
+L = __import__("lidaxiao.analyze.llm", fromlist=["llm"])
+
+
+def call_with_broken_llm(fn):
+    origin = L.call_llm
+    L.call_llm = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("所有通道都挂了"))
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            out = fn()
+    finally:
+        L.call_llm = origin
+    return out, buf.getvalue()
+
+
+out, logtxt = call_with_broken_llm(lambda: L.analyze_dynamic({}, None, opus_parsed))
+chk("LLM 全通道失败: analyze_dynamic 返回空串", out == "", repr(out))
+chk("LLM 失败: 只记一条日志且说明仅出原文",
+    logtxt.count("仅出原文") == 1, logtxt.strip())
+chk("LLM 失败: 不抛异常", True)
+chk("LLM 失败: 渲染仍出原文并标注未分析",
+    "原文(813 字)" in R.dynamic_md(opus_parsed, out)
+    and R.DYNAMIC_UNAVAILABLE in R.dynamic_md(opus_parsed, out))
+chk("空正文动态不调用 LLM", L.analyze_dynamic({}, None, {"id_str": "1"}) == "")
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

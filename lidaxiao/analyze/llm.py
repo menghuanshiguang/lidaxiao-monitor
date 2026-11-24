@@ -8,7 +8,8 @@ import subprocess
 import sys
 
 from lidaxiao.common import CN_TZ, WORKDIR
-from lidaxiao.prompts import ANALYZE_SYSTEM, REPORT_SECTIONS, REPORT_TAIL
+from lidaxiao.prompts import (ANALYZE_SYSTEM, DYNAMIC_SYSTEM, REPORT_SECTIONS,
+                              REPORT_TAIL)
 from lidaxiao.textutil import log, read_text
 from lidaxiao.config import FREE_PROVIDER, load_llm_key  # noqa: E402
 from lidaxiao.llmio import (  # noqa: F401 - 文本通道自用的公共件 (视觉通道直接用 llmio)
@@ -533,3 +534,24 @@ def analyze_subtitles(cfg, api_key, video, subtitle_text, history, ending=None):
     return tighten_analysis(out, subtitle_text, history)
 
 
+
+
+def analyze_dynamic(cfg, api_key, dynamic):
+    """一条动态的简版解读。任何失败返回 "" —— 调用方据此降级成"只出原文", 绝不抛。"""
+    d = dynamic or {}
+    text = (d.get("text") or "").strip()
+    title = (d.get("title") or "").strip()
+    if not text and not title:
+        return ""
+    user = [f"【动态类型】{d.get('major_type') or d.get('type') or '未知'}"]
+    if title:
+        user.append(f"【标题】{title}")
+    if text:
+        user.append(f"【正文】\n{text}")
+    user.append("请按上面的要求给出简版解码。")
+    try:
+        out = call_llm(cfg, api_key, DYNAMIC_SYSTEM, "\n".join(user))
+        return (out or "").strip()
+    except Exception as exc:
+        log(f"⚠️ 动态简版分析失败(仅出原文): {type(exc).__name__}: {exc}")
+        return ""

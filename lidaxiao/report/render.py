@@ -256,3 +256,94 @@ def ending_md(rec):
 def list_line(video):
     t = datetime.datetime.fromtimestamp(video.get("pubdate", time.time()), CN_TZ)
     return f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
+
+
+# ------------------------------------------------------------------ 动态一节
+DYNAMIC_SECTION = "## 李大霄动态"
+DYNAMIC_TEXT_LIMIT = 400          # 原文截断口径: 按**字符**数(len(str)), 不是字节
+DYNAMIC_MARKER = "<!-- dynamic:{} -->"
+DYNAMIC_TYPE_LABEL = {
+    "MAJOR_TYPE_OPUS": "长文动态",
+    "MAJOR_TYPE_ARCHIVE": "视频投稿",
+    "MAJOR_TYPE_DRAW": "图文动态",
+}
+DYNAMIC_UNAVAILABLE = "（未分析：LLM 通道全部失败，仅保留原文）"
+
+
+def _dynamic_time(ts):
+    if not isinstance(ts, int):
+        return ""
+    return datetime.datetime.fromtimestamp(ts, CN_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def dynamic_md(dynamic, analysis=""):
+    """单条动态的 markdown 块: 时间 + 类型 + 原文(截断) + 简版解读"""
+    d = dynamic or {}
+    body = (d.get("text") or "").strip() or (d.get("title") or "").strip()
+    total = len(body)                       # 字符数, 不是字节
+    if total > DYNAMIC_TEXT_LIMIT:
+        shown = (body[:DYNAMIC_TEXT_LIMIT].rstrip()
+                 + f"…(截断, 原文 {total} 字)")
+    else:
+        shown = body
+    head = " · ".join(x for x in (_dynamic_time(d.get("pub_ts")),
+                                  DYNAMIC_TYPE_LABEL.get(d.get("major_type"), "动态")) if x)
+    lines = [f"### {head}",
+             DYNAMIC_MARKER.format(d.get("id_str") or ""),
+             f"原文({total} 字): {shown}"]
+    brief = (analysis or "").strip()
+    lines.append(f"简版: {brief}" if brief else f"简版: {DYNAMIC_UNAVAILABLE}")
+    return "\n".join(lines)
+
+
+def _insert_dynamic_blocks(text, blocks):
+    """插入到已有「## 李大霄动态」小节末尾; 没有该小节则追加到文末"""
+    block = "\n\n".join(blocks)
+    lines = text.splitlines()
+    idx = next((i for i, ln in enumerate(lines)
+                if ln.strip() == DYNAMIC_SECTION), None)
+    if idx is None:
+        return text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block + "\n"
+    end = len(lines)
+    for j in range(idx + 1, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    head, tail = lines[:end], lines[end:]
+    while head and not head[-1].strip():
+        head.pop()
+    out = "\n".join(head) + "\n\n" + block + "\n"
+    if tail:
+        out += "\n" + "\n".join(tail).lstrip("\n") + "\n"
+    return out
+
+
+def append_dynamics(date_str, entries):
+    """把动态追加到当日报告的「## 李大霄动态」一节, 返回实际追加条数。
+
+    幂等**靠报告自身的 `<!-- dynamic:id -->` 标记**, 不靠 state:
+    "报告已写、state 还没写"的崩溃窗口重跑时不会重复追加。
+    这是硬约束(阶段 4): state 不许先于报告落盘, 判重也不许只靠 state。
+    """
+    entries = [e for e in (entries or [])
+               if (e.get("dynamic") or {}).get("id_str")]
+    if not entries:
+        return 0
+    rp = report_path(date_str)
+    if os.path.exists(rp):
+        text = read_text(rp)
+    else:
+        text = (f"# 📺 李大霄视频日报 {date_str}\n\n"
+                f"## 今日摘要\n\n"
+                f"## 视频清单\n")
+    seen, blocks = set(), []
+    for e in entries:
+        did = e["dynamic"]["id_str"]
+        if did in seen or DYNAMIC_MARKER.format(did) in text:
+            continue
+        seen.add(did)
+        blocks.append(dynamic_md(e["dynamic"], e.get("analysis", "")))
+    if not blocks:
+        return 0
+    write_text(rp, _insert_dynamic_blocks(text, blocks))
+    return len(blocks)

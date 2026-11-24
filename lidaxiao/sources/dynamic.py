@@ -354,41 +354,49 @@ def new_dynamics(cfg, items, seen=None):
     return out
 
 
-def process_dynamics(cfg=None):
-    """主流程入口: 抓一页 -> 去重 -> 落 state。**任何失败都只记一条日志, 不抛。**
+def collect_dynamics(cfg=None):
+    """抓一页并过滤掉已见项。**只读不写**: 这里绝不推进 state。
 
-    返回 {status, new, seen_written, last_dynamic_id}:
-      disabled  config 里 dynamic.enabled=false
-      empty     限流软空(code=0 但 items=[]), 或 risk/error —— 一律不写 state、不出章节
-      ok        拿到数据; new 为本次新增(可能为空)
-
-    state 不写的情况: 只要不是 ok, 一律不动文件 —— 把没抓到当成"没有动态"会静默漏采。
+    阶段 4 的硬顺序是「渲染 → 报告写成功 → 才推进 state」, 所以本函数只负责
+    "拿到什么", 落盘由调用方在报告写成功之后调 commit_dynamics 完成。
+    返回 {status, new}: status 非 ok 时 new 恒为空。
     """
     cfg = cfg or {}
     try:
         dcfg = cfg.get("dynamic") or {}
         if not dcfg.get("enabled", True):
             log("动态: 已禁用 (config dynamic.enabled=false), 跳过")
-            return {"status": "disabled", "new": [], "seen_written": False}
+            return {"status": "disabled", "new": []}
 
         result = fetch_dynamics(cfg, limit=dcfg.get("limit"))
         if not is_usable(result):
             log(f"⚠️ 动态本次没拿到 ({result.get('status')}: "
                 f"{result.get('message')}), 不写 state、不出章节")
-            return {"status": result.get("status"), "new": [], "seen_written": False}
+            return {"status": result.get("status"), "new": []}
 
         seen = load_seen(cfg)
         fresh = new_dynamics(cfg, result["items"], seen=set(seen))
         if not fresh:
             log("动态: 无新增")
-            return {"status": "ok", "new": [], "seen_written": False,
-                    "last_dynamic_id": load_last_id(cfg)}
-
-        last_id = fresh[0]["id_str"]
-        save_seen(seen + [d["id_str"] for d in fresh], cfg, last_id=last_id)
-        log(f"动态: 新增 {len(fresh)} 条, last_dynamic_id={last_id}")
-        return {"status": "ok", "new": fresh, "seen_written": True,
-                "last_dynamic_id": last_id}
+        else:
+            log(f"动态: 待处理 {len(fresh)} 条")
+        return {"status": "ok", "new": fresh}
     except Exception as exc:                       # 兜底: 绝不影响视频链路
         log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
-        return {"status": "error", "new": [], "seen_written": False}
+        return {"status": "error", "new": []}
+
+
+def commit_dynamics(cfg, dynamics):
+    """**报告追加成功之后**才调用: 把 id 与 last_dynamic_id 落进 state。
+
+    调用方保证顺序; 本函数不判断报告状态, 也不抓取。
+    返回写入的 last_dynamic_id (没有新增时返回原值)。
+    """
+    items = [d for d in (dynamics or []) if isinstance(d, dict) and d.get("id_str")]
+    if not items:
+        return load_last_id(cfg)
+    seen = load_seen(cfg)
+    last_id = items[0]["id_str"]
+    save_seen(seen + [d["id_str"] for d in items], cfg, last_id=last_id)
+    log(f"动态: state 已推进 {len(items)} 条, last_dynamic_id={last_id}")
+    return last_id
