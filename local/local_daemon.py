@@ -307,51 +307,80 @@ def _sec_time(sec_text, *list_maps):
     return "99:99"
 
 
+def _split_top(lines):
+    """按顶层 `## ` 切块 -> (首个块之前的行, [[标题行, ...正文]...])"""
+    head, blocks, cur = [], [], None
+    for ln in lines:
+        if ln.startswith("## "):
+            if cur is not None:
+                blocks.append(cur)
+            cur = [ln]
+        elif cur is None:
+            head.append(ln)
+        else:
+            cur.append(ln)
+    if cur is not None:
+        blocks.append(cur)
+    return head, blocks
+
+
+_VIDEO_HEAD_RE = re.compile(r"^##\s*视频\d*[:：]")
+
+
 def _merge_report(new_text, old_text):
-    """合并两份日报: 保留旧报告中不在新报告里的视频章节, 新报告的章节覆盖旧的同BV章节"""
-    # 解析旧报告的视频章节 (按BV定位)
-    sec_re = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$")
-    old_secs = {}  # bvid -> (header_line, content)
-    old_lines = old_text.splitlines()
-    cur_bvid = None
-    cur_start = None
-    for i, ln in enumerate(old_lines):
-        m = sec_re.match(ln)
-        if m:
-            if cur_bvid and cur_start is not None:
-                old_secs[cur_bvid] = "\n".join(old_lines[cur_start:i])
-            cur_bvid = m.group(2)
-            cur_start = i
-    if cur_bvid and cur_start is not None:
-        old_secs[cur_bvid] = "\n".join(old_lines[cur_start:])
-    if not old_secs:
-        return new_text  # 旧报告无法解析, 直接用新报告
-    # 解析新报告的视频章节
-    new_secs = {}  # bvid -> (header_line, content)
-    new_lines = new_text.splitlines()
-    cur_bvid = None
-    cur_start = None
-    for i, ln in enumerate(new_lines):
-        m = sec_re.match(ln)
-        if m:
-            if cur_bvid and cur_start is not None:
-                new_secs[cur_bvid] = "\n".join(new_lines[cur_start:i])
-            cur_bvid = m.group(2)
-            cur_start = i
-    if cur_bvid and cur_start is not None:
-        new_secs[cur_bvid] = "\n".join(new_lines[cur_start:])
-    # 合并: 新报告的章节 + 旧报告中不在新报告里的章节
-    merged_map = {}
-    for bvid, sec_text in old_secs.items():
-        merged_map[bvid] = sec_text
-    for bvid, sec_text in new_secs.items():
-        merged_map[bvid] = sec_text          # 新报告的同BV章节覆盖旧的
-    # 章节按发布时间升序 (时间来自清单行的 [HH:MM]); 少了时间就排最后
+    """合并两份日报。
+
+    - 视频章节: 按 BV 取并集, 新报告的同 BV 章节覆盖旧的(旧报告里没重跑的也保留)
+    - **非视频顶层节**(如 `## 李大霄动态` 及其收尾声明): 旧报告里有、新报告里没有的
+      必须原样保住。早先只按 `## 视频N:` 保章节, 同一天重跑且动态 0 新增时, 已发布的
+      动态节连同声明会被静默吃掉, 而 state 里这些 id 仍是「已见」, 当天补不回来。
+    - 摘要 / 清单按合并后的章节顺序重建
+    """
+    # 真实日报的标题是 `## 视频1:《…》 (BV…)`(冒号后无空格), 这里两种写法都容忍
+    sec_re = re.compile(r"^##\s*视频\d+\s*[:：]\s*《(.+?)》\s*\(?(BV\w+)\)?\s*$")
+    _h, old_blocks = _split_top(old_text.splitlines())
+    _h2, new_blocks = _split_top(new_text.splitlines())
+
+    def key_of(block):
+        m = sec_re.match(block[0])
+        return m.group(2) if m else None
+
+    old_video = {key_of(b): b for b in old_blocks if key_of(b)}
+    new_video = {key_of(b): b for b in new_blocks if key_of(b)}
+    if not old_video and not new_video:
+        return new_text
+
+    merged_map = dict(old_video)
+    merged_map.update(new_video)          # 新报告的同 BV 章节覆盖旧的
+
     _olists = _digest_maps(old_text)[1]
     _nlists = _digest_maps(new_text)[1]
-    merged_secs = sorted(merged_map.values(),
+    merged_secs = sorted(("\n".join(b) for b in merged_map.values()),
                          key=lambda t: _sec_time(t, _nlists, _olists))
-    # 重建报告: 取新报告的 header + summary + list, 追加合并后的章节
+
+    # 非视频顶层节: 新报告的先放(它们已是最新), 旧报告里新报告没有的原样补回
+    def other_blocks(blocks):
+        out = {}
+        for b in blocks:
+            if _VIDEO_HEAD_RE.match(b[0]) or sec_re.match(b[0]):
+                continue
+            if b[0].startswith("## 今日摘要") or b[0].startswith("## 视频清单"):
+                continue          # 这两节由下面按合并结果重建, 不能当普通节搬过去
+            out.setdefault(b[0].strip(), b)
+        return out
+
+    new_other = other_blocks(new_blocks)
+    old_other = other_blocks(old_blocks)
+    others = [new_other[k] for k in new_other]
+    for k, b in old_other.items():
+        if k not in new_other:
+            others.append(b)
+    if not others:
+        # 新报告可能把非视频节放在了最后一个视频块里? 不会: _split_top 按 `## ` 切
+        pass
+
+    # 重建: 新报告的 header + 摘要/清单 + 合并后的章节 + 非视频顶层节
+    new_lines = new_text.splitlines()
     sec_start = len(new_lines)
     for i, ln in enumerate(new_lines):
         if sec_re.match(ln):
@@ -362,11 +391,12 @@ def _merge_report(new_text, old_text):
         if ln.startswith("## 今日摘要") or _SEC_RE.match(ln):
             break
         title_part.append(ln)
+
     body = "\n\n".join(merged_secs)
     # 重新编号章节 (合并后序号可能重复)
     n_gen = (i for i in range(1, 100))
     body = re.sub(r"^## 视频\d+:", lambda m: f"## 视频{next(n_gen)}:", body, flags=re.M)
-    # 摘要/清单按合并后的章节顺序重建(旧报告里没被重跑的条目也保留)
+
     old_sums, old_lists = _digest_maps(old_text)
     new_sums, new_lists = _digest_maps(new_text)
     sums = {**old_sums, **new_sums}
@@ -377,7 +407,12 @@ def _merge_report(new_text, old_text):
     header = "\n".join(title_part).rstrip()
     header += "\n\n## 今日摘要\n" + "\n".join(sum_lines)
     header += "\n\n## 视频清单\n" + "\n".join(list_lines)
-    return header + "\n\n" + body + "\n"
+    out = header + "\n\n" + body
+    for blk in others:
+        text = "\n".join(blk).strip("\n")
+        if text:
+            out = out.rstrip() + "\n\n" + text
+    return out.rstrip() + "\n"
 
 
 def _pull_rebase(push_url):

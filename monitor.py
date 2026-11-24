@@ -267,8 +267,9 @@ from lidaxiao.vision import check_vision  # noqa: E402
 # 5. 每日报告
 # =====================================================================
 from lidaxiao.report.render import (  # noqa: E402
-    append_dynamics, build_section, ensure_disclaimer,
-    list_line, postprocess_analysis, report_date_of, upsert_report)
+    append_dynamics, build_section, ensure_disclaimer, list_line,
+    marked_dynamic_ids, postprocess_analysis, report_date_of, report_path,
+    upsert_report)
 
 
 
@@ -406,17 +407,25 @@ def process_dynamics(cfg, api_key, video_ok, touched=None):
     if not video_ok:
         log(f"⚠️ 视频列表未拿到, 动态 {len(new)} 条本次不落盘、不推进 state(下次正常 run 再补)")
         return 0
-    entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
-               for d in new]
     today = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
     date_str = dynamics_target_date(touched, today)
     src = "本次处理的视频报告" if any(report_date_of(p) for p in (touched or [])) else "当天(没新视频)"
     log(f"ℹ️ 动态写入目标: reports/{date_str}.md (来源: {src})")
-    added = append_dynamics(date_str, entries, allow_create=True)
-    if added == len(new):
+
+    # 已发布的条目原样复用: 报告里已有 <!-- dynamic:id --> 的, 不再调 LLM、也不会被改写
+    # (否则第二次 run 会把已发布的分析按模型随机性重写一遍, 节 sha 漂移, 还白花额度)。
+    published = marked_dynamic_ids(read_text(report_path(date_str), default=""))
+    todo = [d for d in new if str(d.get("id_str") or "") not in published]
+    if len(todo) < len(new):
+        log(f"ℹ️ 报告里已有 {len(new) - len(todo)} 条动态, 原样复用不重分析")
+    entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
+               for d in todo]
+    added = append_dynamics(date_str, entries, allow_create=True) if entries else 0
+    if added == len(todo):
+        # 已发布的那批也算已处理: 它们本来就在报告里
         commit_dynamics(cfg, new)
     else:
-        log(f"⚠️ 动态只写入 {added}/{len(new)} 条, 不推进 state "
+        log(f"⚠️ 动态只写入 {added}/{len(todo)} 条, 不推进 state "
             f"(没落盘的不会标成已处理)")
     return added
 

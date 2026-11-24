@@ -271,6 +271,7 @@ def list_line(video):
 DYNAMIC_SECTION = "## 李大霄动态"
 DYNAMIC_TEXT_LIMIT = 400          # 原文截断口径: 按**字符**数(len(str)), 不是字节
 DYNAMIC_MARKER = "<!-- dynamic:{} -->"
+DYNAMIC_MARKER_RE = re.compile(r"<!-- dynamic:(\d+) -->")
 DYNAMIC_TYPE_LABEL = {
     "MAJOR_TYPE_OPUS": "长文动态",
     "MAJOR_TYPE_ARCHIVE": "视频投稿",
@@ -305,6 +306,11 @@ def dynamic_md(dynamic, analysis=""):
     brief = re.sub(r"^简\s*版\s*[:：]\s*", "", brief).strip()
     lines.append(f"简版: {brief}" if brief else f"简版: {DYNAMIC_UNAVAILABLE}")
     return "\n".join(lines)
+
+
+def marked_dynamic_ids(text):
+    """报告里已经发布过的动态 id 集合 —— 幂等与「不重分析」判据都靠它。"""
+    return set(DYNAMIC_MARKER_RE.findall(text or ""))
 
 
 def _disclaimer_line(text):

@@ -877,5 +877,77 @@ chk("state 写出后无 tmp 残留", [x for x in os.listdir(_sd) if ".tmp." in x
 chk("state 内容可读回", set(D.load_seen(_scfg)) == {"a", "b"}
     and D.load_last_id(_scfg) == "b")
 
+# ---------------------------------------------------------------- 已发布的不许重写
+# 第二次 run 把 13 条全重新分析了一遍, 节 sha 从 19da19eb 变 76a3bdaa:
+# 没重复, 但已发布的分析被模型随机性改写, 还白花一次额度。标准是两 run 节 sha 相同。
+print("== 已发布动态原样复用 ==")
+_re_dir = tempfile.mkdtemp()
+_re_path = os.path.join(_re_dir, "2026-11-30.md")
+_pub1 = dict(opus_parsed)
+_pub2 = dict(av_parsed)
+with open(_re_path, "w", encoding="utf-8") as fh:
+    fh.write("# 📺 李大霄视频日报 2026-11-30\n\n## 今日摘要\n- 视频《一》: 摘要\n\n"
+             "## 视频清单\n- [09:00] 一 (BV1re00001)\n\n"
+             "## 视频1: 《一》 (BV1re00001)\n\n【一句话摘要】一\n\n"
+             + R.DISCLAIMER + "\n\n## 李大霄动态\n\n"
+             + "\n\n".join([R.dynamic_md(_pub1, "第一次的分析 A"),
+                             R.dynamic_md(_pub2, "第一次的分析 B")])
+             + "\n\n" + R.DISCLAIMER + "\n")
+_before_txt = open(_re_path, encoding="utf-8").read()
+_before_sec = _before_txt[_before_txt.index("## 李大霄动态"):]
+_new_item = dict(opus_parsed, id_str="1273504300584140777")
+_calls = []
+
+saved_pd = (M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics)
+_committed = []
+M.collect_dynamics = lambda cfg: {"status": "ok", "new": [_pub1, _pub2, _new_item]}
+M.analyze_dynamic = lambda cfg, k, d: (_calls.append(d["id_str"]), "第二次的分析")[1]
+M.commit_dynamics = lambda cfg, ds: _committed.append([d["id_str"] for d in ds])
+R.report_path = lambda ds: os.path.join(_re_dir, f"{ds}.md")
+_M_rp_saved = M.report_path
+M.report_path = R.report_path          # monitor 按名 import 了 report_path, 两边都要打
+buf = io.StringIO()
+try:
+    with contextlib.redirect_stdout(buf):
+        _added_re = M.process_dynamics({"state_dir": tempfile.mkdtemp(),
+                                        "dynamic": {"enabled": True}},
+                                       "KEY", True, [_re_path])
+finally:
+    M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics = saved_pd
+_after_txt = open(_re_path, encoding="utf-8").read()
+chk("只分析新 id, 已发布的 2 条不调 LLM",
+    _calls == ["1273504300584140777"], _calls)
+chk("只追加 1 条", _added_re == 1, _added_re)
+chk("已发布的两条原样逐字节仍在(整块比对)",
+    R.dynamic_md(_pub1, "第一次的分析 A") in _after_txt
+    and R.dynamic_md(_pub2, "第一次的分析 B") in _after_txt, "旧块被改写")
+chk("已发布的没有被第二次的分析覆盖", "第二次的分析" in _after_txt
+    and _after_txt.count("第二次的分析") == 1, _after_txt.count("第二次的分析"))
+chk("新条目追加在节内", "1273504300584140777" in _after_txt)
+chk("末行仍是声明", [l for l in _after_txt.splitlines() if l.strip()][-1] == R.DISCLAIMER)
+chk("state 推进 3 条(含已发布的)", _committed == [[str(_pub1["id_str"]),
+                                                   str(_pub2["id_str"]),
+                                                   "1273504300584140777"]], _committed)
+
+# 第二次 run: 三条都已在报告里 -> 0 次 LLM, 报告字节不变(节 sha 相同)
+_sha_before = hashlib.sha256(open(_re_path, "rb").read()).hexdigest()
+_calls2 = []
+M.collect_dynamics = lambda cfg: {"status": "ok", "new": [_pub1, _pub2, _new_item]}
+M.analyze_dynamic = lambda cfg, k, d: (_calls2.append(d["id_str"]), "不该被调用")[1]
+M.commit_dynamics = lambda cfg, ds: None
+buf2 = io.StringIO()
+try:
+    with contextlib.redirect_stdout(buf2):
+        _added_re2 = M.process_dynamics({"state_dir": tempfile.mkdtemp(),
+                                         "dynamic": {"enabled": True}},
+                                        "KEY", True, [_re_path])
+finally:
+    M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics = saved_pd
+    M.report_path = _M_rp_saved
+chk("第二次 run: 一条都不重新分析", _calls2 == [], _calls2)
+chk("第二次 run: 0 追加", _added_re2 == 0, _added_re2)
+chk("第二次 run: 报告字节不变(节 sha 相同)",
+    _sha_before == hashlib.sha256(open(_re_path, "rb").read()).hexdigest())
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
