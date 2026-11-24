@@ -150,8 +150,8 @@ jobs:
           PYTHONIOENCODING: utf-8
           LIDAXIAO_OCR_ENGINE: ${{ github.event.inputs.ocr_engine }}
         run: |
-          # 清理可能残留的锁
-          Remove-Item data\monitor.lock -ErrorAction SilentlyContinue
+          # 不许在这里无条件删锁: RunLock 自己带 pid 存活检查 + 陈旧超时, 预删除等于把互斥废掉。
+          # 真死锁时人工确认后再删, 不在每次 run 开始时删。
           $force = "${{ github.event.inputs.force }}"
           if ($force -eq "true") {
             $b = Get-Content data\last_bvid.txt -ErrorAction SilentlyContinue
