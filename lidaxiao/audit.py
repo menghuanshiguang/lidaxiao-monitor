@@ -173,7 +173,15 @@ def make_summary_line(title, analysis):
 
 
 def resort_report(text):
-    """BUG-12 排序统一: 今日摘要 / 视频清单 / 正文章节 统一按发布时间升序。"""
+    """BUG-12 排序统一: 今日摘要 / 视频清单 / 正文章节 统一按发布时间升序。
+
+    清单之后按**任意** `## ` 标题切块: 视频块按时间排序并重编号, 其它小块
+    (如「## 李大霄动态」)保持原文顺序、整体排在视频章节之后。
+
+    早先只认 `## 视频N:` 标题, 清单之后到首个视频标题之间的内容会被整块丢弃:
+    当天先写动态节、随后视频写盘走这里, 动态会**永久消失**(state 已记录 id,
+    不会再补)。见 tests/test_dynamic.py 的「视频写盘后动态节仍在」。
+    """
     if not text:
         return text
     lines = text.splitlines()
@@ -188,7 +196,7 @@ def resort_report(text):
             title_time[m.group(2).strip()] = m.group(1)
     key_of = lambda s: times.get(s) or title_time.get(s) or "99:99"
 
-    # 2) 切成 摘要块 / 清单块 / 章节块
+    # 2) 定位 摘要块 / 清单块
     idx = {}
     for i, ln in enumerate(lines):
         if ln.startswith("## 今日摘要"):
@@ -202,32 +210,25 @@ def resort_report(text):
     sum_hdr = lines[idx["sum"]]
     list_hdr = lines[idx["list"]]
 
-    # 摘要行: 摘要头之后到清单头之间
     sum_fill = [l for l in lines[idx["sum"] + 1:idx["list"]] if l.startswith("- ")]
     pre_list = [l for l in lines[idx["sum"] + 1:idx["list"]] if not l.startswith("- ")]
     list_fill = [l for l in lines[idx["list"] + 1:] if l.startswith("- [")]
-    # 清单之后第一个 "## 视频" 开始为章节区
-    sec_start = None
-    for i in range(idx["list"] + 1, len(lines)):
-        if re.match(r"^##\s*视频\d*[:：]", lines[i]):
-            sec_start = i
-            break
-    if sec_start is None:
-        tail = lines[idx["list"] + 1:]
-        sections = []
-    else:
-        tail = []
-        sections = []
-        cur = None
-        for ln in lines[sec_start:]:
-            if re.match(r"^##\s*视频\d*[:：]", ln):
-                if cur is not None:
-                    sections.append(cur)
-                cur = [ln]
-            elif cur is not None:
-                cur.append(ln)
-        if cur is not None:
-            sections.append(cur)
+
+    # 2.5) 清单之后: 按任意 "## " 标题切块 (视频块排序, 其它块原样保留)
+    blocks, cur = [], None
+    for ln in lines[idx["list"] + 1:]:
+        if ln.startswith("## "):
+            if cur is not None:
+                blocks.append(cur)
+            cur = [ln]
+        elif cur is not None:
+            cur.append(ln)
+    if cur is not None:
+        blocks.append(cur)
+
+    is_video = lambda blk: bool(re.match(r"^##\s*视频\d*[:：]", blk[0]))
+    sections = [b for b in blocks if is_video(b)]
+    others = [b for b in blocks if not is_video(b)]
 
     def sec_key(block):
         m = re.search(r"\((BV\w+)\)", block[0])
@@ -256,4 +257,14 @@ def resort_report(text):
         out.pop()
     out.append("")
     out += out_secs
+    if others:
+        while out and not out[-1].strip():
+            out.pop()
+    for blk in others:
+        block = list(blk)
+        while block and not block[-1].strip():
+            block.pop()
+        if not block:
+            continue
+        out += [""] + block
     return "\n".join(out).strip() + "\n"

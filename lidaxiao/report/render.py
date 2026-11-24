@@ -318,12 +318,16 @@ def _insert_dynamic_blocks(text, blocks):
     return out
 
 
-def append_dynamics(date_str, entries):
+def append_dynamics(date_str, entries, allow_create=True):
     """把动态追加到当日报告的「## 李大霄动态」一节, 返回实际追加条数。
 
     幂等**靠报告自身的 `<!-- dynamic:id -->` 标记**, 不靠 state:
     "报告已写、state 还没写"的崩溃窗口重跑时不会重复追加。
     这是硬约束(阶段 4): state 不许先于报告落盘, 判重也不许只靠 state。
+
+    allow_create=False 时, 当日报告不存在就**不新建**、直接返回 0:
+    视频列表拉取失败那条路径也在 finally 里会走到这里, 若它新建一份空日报,
+    等于告诉读者"当天真的没有视频", 而真实情况是根本没拉到。
     """
     entries = [e for e in (entries or [])
                if (e.get("dynamic") or {}).get("id_str")]
@@ -332,6 +336,9 @@ def append_dynamics(date_str, entries):
     rp = report_path(date_str)
     if os.path.exists(rp):
         text = read_text(rp)
+    elif not allow_create:
+        log(f"⚠️ 当日报告不存在且本次不允许新建(视频列表未成功), 动态暂不落盘: {date_str}")
+        return 0
     else:
         text = (f"# 📺 李大霄视频日报 {date_str}\n\n"
                 f"## 今日摘要\n\n"

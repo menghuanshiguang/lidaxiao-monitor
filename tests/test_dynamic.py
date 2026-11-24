@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -311,6 +312,163 @@ chk("LLM 失败: 渲染仍出原文并标注未分析",
     "原文(813 字)" in R.dynamic_md(opus_parsed, out)
     and R.DYNAMIC_UNAVAILABLE in R.dynamic_md(opus_parsed, out))
 chk("空正文动态不调用 LLM", L.analyze_dynamic({}, None, {"id_str": "1"}) == "")
+
+# ---------------------------------------------------------------- 报告不被视频写盘抹掉
+A = __import__("lidaxiao.audit", fromlist=["audit"])
+
+# 改动前 resort_report 的原样副本: 只用来证「视频链路输出零变化」
+def _legacy_resort(text):
+    """BUG-12 排序统一: 今日摘要 / 视频清单 / 正文章节 统一按发布时间升序。"""
+    if not text:
+        return text
+    lines = text.splitlines()
+
+    # 1) 从清单行抽取 时间 与 BV
+    times = {}          # bvid -> "HH:MM"
+    title_time = {}     # 标题 -> "HH:MM"
+    for ln in lines:
+        m = re.match(r"^-\s*\[(\d{2}:\d{2})\]\s*(.+?)\s*\((BV\w+)\)", ln)
+        if m:
+            times[m.group(3)] = m.group(1)
+            title_time[m.group(2).strip()] = m.group(1)
+    key_of = lambda s: times.get(s) or title_time.get(s) or "99:99"
+
+    # 2) 切成 摘要块 / 清单块 / 章节块
+    idx = {}
+    for i, ln in enumerate(lines):
+        if ln.startswith("## 今日摘要"):
+            idx["sum"] = i
+        elif ln.startswith("## 视频清单"):
+            idx["list"] = i
+    if "sum" not in idx or "list" not in idx:
+        return text
+
+    head = lines[:idx["sum"]]
+    sum_hdr = lines[idx["sum"]]
+    list_hdr = lines[idx["list"]]
+
+    # 摘要行: 摘要头之后到清单头之间
+    sum_fill = [l for l in lines[idx["sum"] + 1:idx["list"]] if l.startswith("- ")]
+    pre_list = [l for l in lines[idx["sum"] + 1:idx["list"]] if not l.startswith("- ")]
+    list_fill = [l for l in lines[idx["list"] + 1:] if l.startswith("- [")]
+    # 清单之后第一个 "## 视频" 开始为章节区
+    sec_start = None
+    for i in range(idx["list"] + 1, len(lines)):
+        if re.match(r"^##\s*视频\d*[:：]", lines[i]):
+            sec_start = i
+            break
+    if sec_start is None:
+        tail = lines[idx["list"] + 1:]
+        sections = []
+    else:
+        tail = []
+        sections = []
+        cur = None
+        for ln in lines[sec_start:]:
+            if re.match(r"^##\s*视频\d*[:：]", ln):
+                if cur is not None:
+                    sections.append(cur)
+                cur = [ln]
+            elif cur is not None:
+                cur.append(ln)
+        if cur is not None:
+            sections.append(cur)
+
+    def sec_key(block):
+        m = re.search(r"\((BV\w+)\)", block[0])
+        return key_of(m.group(1)) if m else "99:99"
+
+    def title_of(ln):
+        m = re.search(r"视频《(.+?)》", ln)
+        return m.group(1).strip() if m else ""
+
+    sum_fill.sort(key=lambda l: key_of(title_of(l)))
+    list_fill.sort(key=lambda l: key_of(re.search(r"\((BV\w+)\)", l).group(1))
+                   if re.search(r"\((BV\w+)\)", l) else "99:99")
+    sections.sort(key=sec_key)
+
+    # 3) 重排章节编号
+    out_secs = []
+    for n, blk in enumerate(sections, 1):
+        first = re.sub(r"^##\s*视频\d*[:：]", f"## 视频{n}:", blk[0])
+        out_secs.extend([first] + blk[1:])
+
+    out = list(head) + [sum_hdr] + sum_fill
+    if pre_list:
+        out += ([""] if pre_list[0].strip() else []) + [l for l in pre_list if l.strip()]
+    out += ["", list_hdr] + list_fill
+    while out and not out[-1].strip():
+        out.pop()
+    out.append("")
+    out += out_secs
+    return "\n".join(out).strip() + "\n"
+
+repdir2 = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(repdir2, f"{date_str}.md")
+day = "2026-11-24"
+R.append_dynamics(day, entries)
+rp2 = R.report_path(day)
+chk("动态先落盘: 报告已建且含动态节",
+    "## 李大霄动态" in R.read_text(rp2))
+
+# 同一天再来一个视频写盘(走真实 upsert_report, 内部会调 resort_report)
+import datetime as _dt
+_ts = int(_dt.datetime(2026, 11, 24, 12, 0, tzinfo=_dt.timezone(_dt.timedelta(hours=8))).timestamp())
+video = {"bvid": "BV1test00001", "title": "测试视频", "pubdate": _ts}
+section = "## 视频1: 《测试视频》 (BV1test00001)\n\n【一句话摘要】测试\n"
+R.upsert_report(video, section,
+                "- 视频《测试视频》: 测试摘要",
+                "- [12:00] 测试视频 (BV1test00001)")
+after = R.read_text(rp2)
+chk("视频写盘后动态节仍在", "## 李大霄动态" in after)
+chk("视频写盘后动态标记仍在",
+    after.count("<!-- dynamic:") == 2, after.count("<!-- dynamic:"))
+chk("视频写盘后视频节也在", "## 视频1: 《测试视频》" in after, after[:200])
+chk("动态节排在视频章节之后",
+    after.index("## 李大霄动态") > after.index("## 视频1: 《测试视频》"))
+
+# 只有视频的报告: 新实现必须与改动前逐字节一致(视频链路零变化)
+VIDEO_ONLY_A = """# 📺 李大霄视频日报 2026-11-24
+
+## 今日摘要
+- 视频《B视频》: 摘要B
+- 视频《A视频》: 摘要A
+
+## 视频清单
+- [11:00] B视频 (BV1bbb)
+- [09:00] A视频 (BV1aaa)
+
+## 视频1: 《A视频》 (BV1aaa)
+
+【一句话摘要】A
+
+## 视频2: 《B视频》 (BV1bbb)
+
+【一句话摘要】B
+"""
+VIDEO_ONLY_B = """# 📺 李大霄视频日报 2026-11-24
+
+## 今日摘要
+- 视频《只有一条》: 摘要
+
+## 视频清单
+- [10:00] 只有一条 (BV1only)
+
+## 视频1: 《只有一条》 (BV1only)
+
+【一句话摘要】只有一条
+"""
+for name, sample in (("两视频乱序", VIDEO_ONLY_A), ("单视频", VIDEO_ONLY_B)):
+    chk(f"视频链路零变化: {name}", A.resort_report(sample) == _legacy_resort(sample))
+chk("resort 幂等", A.resort_report(A.resort_report(VIDEO_ONLY_A)) == A.resort_report(VIDEO_ONLY_A))
+
+# 视频列表没拉到 -> 不许新建当日日报
+repdir3 = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(repdir3, f"{date_str}.md")
+added_no = R.append_dynamics("2026-11-25", entries, allow_create=False)
+chk("列表失败路径不新建日报", added_no == 0 and not os.path.exists(R.report_path("2026-11-25")))
+added_yes = R.append_dynamics("2026-11-25", entries, allow_create=True)
+chk("正常路径仍可新建", added_yes == 2 and os.path.exists(R.report_path("2026-11-25")))
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

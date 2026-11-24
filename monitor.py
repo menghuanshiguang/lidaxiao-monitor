@@ -396,12 +396,17 @@ def main():
     lock = RunLock(os.path.join(WORKDIR, "data", "monitor.lock"))
     if not lock.acquire():
         return 0
+    # 视频列表是否成功拿到: 只有拿到才允许动态去**新建**当日日报。
+    # 列表拉取失败(return 1)那条路径也在 finally 里, 若它新建一份空日报,
+    # 等于告诉读者"当天真的没有视频", 而真实情况是根本没拉到。
+    video_ok = False
     try:
         # 1. 检测更新
         videos = get_space_videos(cfg, cfg["limit"])
         if not videos:
             log("❌ 无法获取UP主视频列表(风控或网络问题)")
             return 1
+        video_ok = True
         # 只处理 baseline(前天)及之后发布的视频, 更早的忽略 (--force 豁免: 始终取最新)
         if not args.force:
             videos = [v for v in videos if is_from_baseline(v)]
@@ -471,7 +476,7 @@ def main():
                 _entries = [{"dynamic": d, "analysis": analyze_dynamic(cfg, api_key, d)}
                             for d in _collected["new"]]
                 _date = datetime.datetime.now(CN_TZ).strftime("%Y-%m-%d")
-                append_dynamics(_date, _entries)
+                append_dynamics(_date, _entries, allow_create=video_ok)
                 commit_dynamics(cfg, _collected["new"])   # 上一行没抛才推进
         except Exception as exc:            # 兜底: 动态任何异常都不改上面的返回码
             log(f"⚠️ 动态处理异常 (已忽略): {type(exc).__name__}: {exc}")
