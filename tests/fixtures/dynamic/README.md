@@ -7,8 +7,8 @@
 |---|---|---|---|
 | feed_space_page.json | /tmp/dynprobe/page1.json | 信封原样, items 只留 1 条 AV + 1 条 DRAW(纯图) | 覆盖 MAJOR_TYPE_ARCHIVE 与 MAJOR_TYPE_DRAW 两条分支 |
 | feed_space_opus.json | /tmp/dynprobe/opus_style.json | 信封原样, items 只留 1 条 AV + 1 条 OPUS(814 字正文) | 覆盖 MAJOR_TYPE_OPUS 分支与 features 参数的必要性 |
-| feed_space_empty.json | /tmp/dynprobe/resp/polymer-feed-space__3_wbi_2.json | 原样复制 | 限流软空: code=0 但 items=[] |
-| feed_space_risk.json | /tmp/dynprobe/resp/polymer-feed-space__2_UA+Referer+buvid_1.json | 原样复制 | 风控: code=-352 |
+| feed_space_empty.json | /tmp/dynprobe/resp/polymer-feed-space__3_wbi_2.json | 重新序列化保存, JSON 内容一致(源 131B → 170B, 缩进与中文不转义所致, 非逐字节复制) | 限流软空: code=0 但 items=[] |
+| feed_space_risk.json | /tmp/dynprobe/resp/polymer-feed-space__2_UA+Referer+buvid_1.json | 重新序列化保存, JSON 内容一致(源 39B → 48B, 同上, 非逐字节复制) | 风控: code=-352 |
 
 ## sha256(全长)
 
@@ -26,3 +26,16 @@
 
 所以两份 fixture 都要留, 且生产请求必须带这个参数, 否则正文丢失。
 另: `polymer/web-dynamic/v1/detail` 对同一 id 返回 DRAW 形状、看不到那 814 字, 不能用来核对 fixture。
+
+## 空页判据不许依赖 has_more
+
+同一件事在不同响应里出现过两种值, 两边都是真的:
+
+- 阶段 1 探针的空页: `has_more=true`(与 items=[] 自相矛盾)
+- 2026-11-24 复核抓到的空页(本目录 `feed_space_empty.json`): `has_more=false`,
+  `total:"0"`, `offset:""`
+
+所以**判据只看 `code` 与 `items` 是否为空**, 不看 `has_more`:
+按 `has_more=true` 去判空, 会把本目录这份真实空页判成"有数据"; 
+按 `has_more=false` 去判, 又会把探针那份判错。两种都会出错, 唯一稳的是 code+items。
+`classify_payload()` 的实现就是这么写的, 别改。
