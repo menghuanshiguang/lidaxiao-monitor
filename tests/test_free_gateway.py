@@ -142,6 +142,39 @@ chk("provider 分派不再走旧直连车道",
     L.FREE_PROVIDER != "free-gateway" and L.FREE_GATEWAY_PROVIDER == "free-gateway",
     (L.FREE_PROVIDER, L.FREE_GATEWAY_PROVIDER))
 
+print("== 车道可分辨 + 直连车道够不到 ==")
+from lidaxiao.config import load_config, FREE_PROVIDER, FREE_GATEWAY_PROVIDER  # noqa: E402
+_cfg = load_config()
+chk("load_config 的 llm_free.provider 是 free-gateway",
+    _cfg["llm_free"]["provider"] == FREE_GATEWAY_PROVIDER, _cfg["llm_free"]["provider"])
+chk("llm_free.base_url 指向本机网关",
+    _cfg["llm_free"]["base_url"].startswith("http://127.0.0.1:18787"), _cfg["llm_free"]["base_url"])
+chk("llm_free.model 留空(运行时现取)", _cfg["llm_free"]["model"] == "", _cfg["llm_free"]["model"])
+# 范围限定在**文本链路**: vision_free 是视觉通道(片尾识图)的免费层, 走的是另一个
+# 客户端与图片输入, 本地文本网关根本不收图, 不能迁; 它 429 时照旧降级到下一级视觉通道。
+_TEXT_SECTIONS = ("llm", "llm_free", "llm_fallback", "llm_cli", "llm_ollama", "llm_local")
+_zen = [k for k in _TEXT_SECTIONS
+        if isinstance(_cfg.get(k), dict) and _cfg[k].get("provider") == FREE_PROVIDER]
+chk("文本链路里没有任何配置段还解析成旧直连车道", _zen == [], _zen)
+chk("vision_free 仍走 Zen 直连(视觉通道, 本地网关不收图) —— 与本规则无关",
+    _cfg["vision_free"]["provider"] == FREE_PROVIDER)
+chk("host 提取正确(直连 vs 本地可分辨)",
+    L.free_gateway_host({"base_url": "http://127.0.0.1:18787/v1"}) == "127.0.0.1:18787"
+    and L.free_gateway_host({"base_url": "https://opencode.ai/zen/v1"}) == "opencode.ai")
+
+gw = FakeGateway(chat_text="看多")
+try:
+    _buf = io.StringIO()
+    with contextlib.redirect_stdout(_buf):
+        L._call_free_gateway({"base_url": gw.base, "model": "", "timeout": 10}, "s", "u")
+    _out = _buf.getvalue()
+finally:
+    gw.close()
+_port = gw.base.split("//", 1)[1].split("/", 1)[0]
+chk("成功日志带 base_url 的 host:port(能跟直连区分)",
+    "✅ free 通道成功" in _out and f"base_url={_port}" in _out, _out.strip())
+chk("取列表的日志也带 host", f"base_url={_port}" in _out, _out.strip())
+
 print("== 链路顺序 ==")
 
 

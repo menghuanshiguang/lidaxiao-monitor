@@ -84,6 +84,16 @@ def free_gateway_models(base_url, timeout=20):
     return [i for i in ids if i and i.endswith("-free")]
 
 
+def free_gateway_host(pcfg):
+    """日志里用来分辨车道的 host:port —— 直连 Zen 与本地网关必须一眼能分开。"""
+    import urllib.parse as _up
+    try:
+        u = _up.urlparse(pcfg.get("base_url") or "")
+        return u.netloc or (pcfg.get("base_url") or "?")
+    except Exception:
+        return "?"
+
+
 def free_gateway_model(pcfg):
     """本次要用的模型 id: 配置里写了就用它, 空则取列表里第一个 -free。"""
     if pcfg.get("model"):
@@ -95,7 +105,8 @@ def free_gateway_model(pcfg):
     if not ids:
         raise RuntimeError("免费车道的模型列表里没有任何 -free id")
     pcfg["_model_cache"] = ids[0]
-    log(f"ℹ️ free 网关模型列表: {len(ids)} 个 -free, 本次用 {ids[0]}")
+    log(f"ℹ️ free 网关模型列表: {len(ids)} 个 -free, 本次用 {ids[0]} "
+        f"(base_url={free_gateway_host(pcfg)})")
     return ids[0]
 
 
@@ -133,7 +144,8 @@ def _call_free_gateway(pcfg, system, user):
         text = data["choices"][0]["message"]["content"]
     except Exception:
         raise RuntimeError(f"free 网关返回体没有 choices[0].message.content: {raw[:200]}")
-    log(f"✅ free 通道成功 (model={model}, HTTP {status}, {len(text or '')} 字)")
+    log(f"✅ free 通道成功 (base_url={free_gateway_host(pcfg)}, model={model}, "
+        f"HTTP {status}, {len(text or '')} 字)")
     return (text or "").strip()
 
 
