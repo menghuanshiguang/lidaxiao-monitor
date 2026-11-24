@@ -22,6 +22,10 @@ on:
         description: 'OCR 引擎覆盖 (留空=用 config.json; rapid / xiaomi)'
         type: string
         default: ''
+      llm:
+        description: 'LLM 通道覆盖: free = 本次优先走本机 dsh-opencode-free 网关 (留空=默认 fallback)'
+        type: string
+        default: ''
 
 concurrency:
   group: lidaxiao-monitor
@@ -127,6 +131,57 @@ jobs:
           # 片尾识图第 3 级通道, DSV_TOKEN secret 未配置时自动跳过
           git clone --depth 1 https://github.com/menghuanshiguang/deepseek-vision-cli.git _repo/deepseek-vision-cli
 
+      - name: Clone opencode free gateway (public)
+        run: |
+          # 本机 OpenAI 兼容网关 (只在 runner 内 127.0.0.1 监听, 出站经生产 Bun worker)
+          git clone --depth 1 https://github.com/menghuanshiguang/dsh-opencode-free.git _repo/dsh-opencode-free
+
+      - name: Setup Node 24 (gateway runtime)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup Bun (free lane transport)
+        uses: oven-sh/setup-bun@v2
+
+      - name: Transport must be the production Bun worker
+        shell: bash
+        run: |
+          bun --version | tee bun-version.txt
+          echo "OUR_FREE_MODEL_BUN=$(command -v bun)" >> "$GITHUB_ENV"
+          test -x "$(command -v bun)"
+
+      - name: Start opencode free gateway (degrade only)
+        id: freegw
+        shell: bash
+        run: |
+          # gateway.js 只 export startGateway, 没有 CLI 入口: `node src/gateway.js` 会加载完就退出,
+          # 必须用 launcher 起。起不来只降级(视频链路与主通道照跑), 不 fail 整个 job。
+          cd _repo/dsh-opencode-free
+          cat > launch.mjs <<'JS'
+          import { startGateway } from './src/gateway.js'
+          const g = await startGateway({ port: 18787 })
+          console.log(`free gateway listening ${g.url}`)
+          JS
+          node launch.mjs > /tmp/free-gateway.log 2>&1 &
+          echo "GW_PID=$!" >> "$GITHUB_ENV"
+          ready=false
+          for i in $(seq 1 30); do
+            sleep 2
+            if curl -fsS --max-time 5 http://127.0.0.1:18787/v1/models > /tmp/free-models.json 2>/dev/null; then
+              ready=true
+              break
+            fi
+          done
+          echo "gateway_ready=$ready" >> "$GITHUB_OUTPUT"
+          cat /tmp/free-gateway.log || true
+          if [ "$ready" = "true" ]; then
+            echo "--- /v1/models ---"
+            cat /tmp/free-models.json
+          else
+            echo "::warning::免费车道网关没起来, 本次降级为不用 free 通道"
+          fi
+
       - name: Write Bilibili cookies (from secret)
         shell: pwsh
         env:
@@ -156,6 +211,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
           LIDAXIAO_OCR_ENGINE: ${{ github.event.inputs.ocr_engine }}
+          LIDAXIAO_LLM: ${{ github.event.inputs.llm }}
         run: |
           # 不许在这里无条件删锁: RunLock 自己带 pid 存活检查 + 陈旧超时, 预删除等于把互斥废掉。
           # 真死锁时人工确认后再删, 不在每次 run 开始时删。
@@ -166,6 +222,17 @@ jobs:
             python lidaxiao.py --once --force
           }
           else { python lidaxiao.py --once }
+
+      - name: Stop opencode free gateway
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${GW_PID:-}" ]; then
+            kill "$GW_PID" 2>/dev/null || true
+            echo "gateway stopped (pid $GW_PID)"
+          fi
+          echo "--- gateway log (tail) ---"
+          tail -30 /tmp/free-gateway.log 2>/dev/null || true
 
       - name: Upload subtitles (OCR 对比用)
         uses: actions/upload-artifact@v4
