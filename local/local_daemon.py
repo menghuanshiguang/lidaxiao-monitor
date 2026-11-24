@@ -432,12 +432,21 @@ def _restore_protected(tmp):
                        capture_output=True, timeout=30)
 
 
-def _push():
-    """提交后执行 merge+push; 报告/state 始终以本地版本为准, 成功返回 True"""
-    push_url = _push_url()
+PUSH_MAX_ATTEMPTS = 3      # 推送尝试次数上限(含首次), 云端正被别的 run 抢占时用得上
+PUSH_BACKOFF_SECONDS = 2   # 退避基数: 2s / 4s / 8s
+
+
+def _push_attempt(push_url, attempt):
+    """一次完整的 合并远端 + 推送 尝试。成功返回 True, 失败返回 False 并写明原因。
+
+    合并用 merge(-X ours) 而不是 rebase: 本机 git 是 libgit2 实现, 不支持 rebase,
+    同一份代码在云端与本机都要能跑, 所以统一走合并; 报告/state 冲突仍由
+    _restore_protected 强制回本地版本, 语义与 rebase 时取本地版本一致。
+    """
     backup = _snapshot_protected()
     try:
         if not _pull_rebase(push_url):
+            log(f"⚠️ 第 {attempt}/{PUSH_MAX_ATTEMPTS} 次推送准备失败: 合并远端失败")
             return False
         _restore_protected(backup)
         # 合并可能把报告/state 改坏(重复/丢章节), 强制恢复本地版本
@@ -461,11 +470,39 @@ def _push():
                 subprocess.run(["git", "commit", "--amend", "--no-edit"], cwd=WORKDIR,
                                check=True, capture_output=True, timeout=30)
             log("✅ 已强制恢复本地报告/state 版本")
-        subprocess.run(["git", "push", push_url, "main"],
-                       cwd=WORKDIR, check=True, capture_output=True, timeout=120)
-        return True
+        r = subprocess.run(["git", "push", push_url, "main"],
+                           cwd=WORKDIR, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        if r.returncode == 0:
+            return True
+        log(f"⚠️ 第 {attempt}/{PUSH_MAX_ATTEMPTS} 次 push 被拒: "
+            f"rc={r.returncode} stderr={r.stderr.strip()[:300]!r}")
+        return False
+    except Exception as exc:                       # 不把异常抛给上层, 交给重试
+        log(f"⚠️ 第 {attempt}/{PUSH_MAX_ATTEMPTS} 次推送异常: {type(exc).__name__}: {exc}")
+        return False
     finally:
         shutil.rmtree(backup, ignore_errors=True)
+
+
+def _push():
+    """提交后执行 merge+push; 报告/state 始终以本地版本为准。有界重试, 成功返回 True
+
+    云端并发被拒(non-fast-forward)是正常现象: 另一个 run 抢先推了报告。
+    这里重试时每次都会先合并远端, 所以第二次通常就能推上去; 上限 3 次, 不无限重试。
+    """
+    push_url = _push_url()
+    for attempt in range(1, PUSH_MAX_ATTEMPTS + 1):
+        if _push_attempt(push_url, attempt):
+            if attempt > 1:
+                log(f"✅ 推送成功 (第 {attempt} 次尝试)")
+            return True
+        if attempt < PUSH_MAX_ATTEMPTS:
+            wait = PUSH_BACKOFF_SECONDS * (2 ** (attempt - 1))
+            log(f"⚠️ 推送失败, {wait}s 后重试 ({attempt}/{PUSH_MAX_ATTEMPTS})")
+            time.sleep(wait)
+    log(f"❌ 推送连续 {PUSH_MAX_ATTEMPTS} 次失败, 放弃本轮推送 (报告已落盘, 下次 run 会带上)")
+    return False
 
 
 def commit_state(args, tag="local"):
