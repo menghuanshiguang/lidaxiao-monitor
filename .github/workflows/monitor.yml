@@ -182,6 +182,66 @@ jobs:
             echo "::warning::免费车道网关没起来, 本次降级为不用 free 通道"
           fi
 
+      - name: Free lane self-check (fail fast)
+        if: always()
+        shell: bash
+        env:
+          LIDAXIAO_LLM: ${{ github.event.inputs.llm }}
+          GATEWAY_READY: ${{ steps.freegw.outputs.gateway_ready }}
+        run: |
+          # 同一次 run 内的自检：起不来 / 列表没有 -free / chat 非 200 / 出站报
+          # "Bun executable not found" 都当场判死。宁可红在这里，也不要跑完 4 分钟
+          # 出一份看起来正常的报告、却根本没用上 free 车道。
+          python - <<'PY'
+          import json, os, sys, urllib.error, urllib.request
+
+          base = "http://127.0.0.1:18787/v1"
+          force_free = (os.environ.get("LIDAXIAO_LLM") or "").strip().lower() == "free"
+          ready = (os.environ.get("GATEWAY_READY") or "").strip() == "true"
+
+          def die(msg):
+              print(f"::error::free 车道自检失败: {msg}")
+              sys.exit(1)
+
+          if not ready:
+              if force_free:
+                  die("网关没起来(GATEWAY_READY!=true), 本次是 llm=free 的强制测试")
+              print("::warning::网关没起来, 本次降级为不用 free 通道(非强制测试)")
+              sys.exit(0)
+
+          def call(method, path, body=None, timeout=180):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(base + path, data=data, method=method,
+                                           headers={"Content-Type": "application/json"})
+              try:
+                  with urllib.request.urlopen(req, timeout=timeout) as r:
+                      return r.status, r.read().decode("utf-8", "replace")
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode("utf-8", "replace")
+              except Exception as e:
+                  return 0, f"{type(e).__name__}: {e}"
+
+          st, raw = call("GET", "/models", timeout=30)
+          if st != 200:
+              die(f"GET /v1/models -> HTTP {st}: {raw[:200]}")
+          ids = [m.get("id") for m in (json.loads(raw).get("data") or []) if isinstance(m, dict)]
+          free_ids = [i for i in ids if i and i.endswith("-free")]
+          print(f"models: {len(ids)} 个, -free {len(free_ids)} 个 -> {free_ids[:5]}")
+          if not free_ids:
+              die("列表里没有任何 -free id")
+
+          st2, raw2 = call("POST", "/chat/completions",
+                           {"model": free_ids[0],
+                            "messages": [{"role": "user", "content": "Reply with exactly: ok"}],
+                            "stream": False})
+          print(f"chat: HTTP {st2}, 片段: {raw2[:200]!r}")
+          if st2 != 200:
+              die(f"POST /chat/completions -> HTTP {st2}: {raw2[:300]}")
+          if "Bun executable not found" in raw2:
+              die("出站报 Bun executable not found —— OUR_FREE_MODEL_BUN 没生效")
+          print(f"::notice::free 车道自检通过 (model={free_ids[0]})")
+          PY
+
       - name: Write Bilibili cookies (from secret)
         shell: pwsh
         env:
