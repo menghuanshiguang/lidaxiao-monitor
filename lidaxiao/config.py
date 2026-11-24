@@ -19,7 +19,8 @@ LLM_PROVIDER_KEY_ENVS = {
 
 LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
 
-FREE_PROVIDER = "opencode-zen-free"
+FREE_PROVIDER = "opencode-zen-free"        # 旧: 直连 Zen 免密车道(指纹头)
+FREE_GATEWAY_PROVIDER = "free-gateway"     # 新: 本机 dsh-opencode-free 网关(OpenAI 兼容, 无鉴权)
 
 
 def _env_or_envfile(name):
@@ -45,6 +46,8 @@ def load_llm_key(provider=None):
     """密钥优先级: 环境变量 > .env 文件; provider=None 时按 OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY 顺序"""
     if provider == FREE_PROVIDER:
         return "public"        # 免密车道固定 token, 走 OpenCode 指纹头校验
+    if provider == FREE_GATEWAY_PROVIDER:
+        return "local"         # 本机网关无鉴权, 这个值不会被发出去
     names = LLM_PROVIDER_KEY_ENVS.get(provider, LLM_KEY_ENVS) if provider else LLM_KEY_ENVS
     for name in names:
         v = _env_or_envfile(name)
@@ -65,13 +68,13 @@ def load_config(path=None):
         "frame_interval": 0.0,          # 0=自适应 (时长/240, 限1~4秒)
         "ocr_confidence": 0.5,
         "min_subtitle_chars": 30,       # 字幕文本少于该长度视为"无字幕"
-        "llm_free": {                           # 免费层: OpenCode Zen 免密车道 (无需任何 key)
+        "llm_free": {                           # 免费车道: 本机 dsh-opencode-free 网关 (OpenAI 兼容, 无鉴权)
             "enabled": True,
-            "provider": "opencode-zen-free",    # 走 Zen 公共免密网关, 固定 Bearer public + OpenCode 指纹头
-            "base_url": "https://opencode.ai/zen/v1",
-            "model": "mimo-v2.6-flash-free",
+            "provider": FREE_GATEWAY_PROVIDER,
+            "base_url": "http://127.0.0.1:18787/v1",
+            "model": "",                        # 空 = 运行时 GET /v1/models 取第一个 -free (不写死)
             "temperature": 0.3,
-            "max_tokens": 32768,                # 该车道 reasoning_effort 是空操作, "max"=把 max_tokens 顶满
+            "max_tokens": 4000,
             "timeout": 300,
         },
         "llm": {

@@ -25,6 +25,9 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lidaxiao.sources import dynamic as D
+# monitor 必须在**任何 report_path 打桩之前**导入: 它 `from render import report_path`
+# 是一次性绑定, 导入得晚会绑到测试刚改的 lambda 上(本文件曾因此在 658 行导入而串味)。
+import monitor as M  # noqa: E402
 
 OK = FAIL = 0
 FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "dynamic")
@@ -655,8 +658,6 @@ chk("正常路径仍可新建", added_yes == 2 and os.path.exists(R.report_path(
 
 # ---------------------------------------------------------------- state 门禁
 # 「state 不许先于报告落盘」的编排侧钉桩: append_dynamics 没落盘就一条都不推进。
-import monitor as M
-
 _orig = (M.collect_dynamics, M.analyze_dynamic, M.append_dynamics, M.commit_dynamics)
 _saved = []
 try:
@@ -767,7 +768,10 @@ chk("线上形态: 视频节与动态节同在一份文件, 末行是声明",
 # 以前 allow_create=False 只挡新建, 挡不住往已存在的旧报告里追加(验收员实测:
 # 旧报告被写 + state 推进 2 条)。这里用真实 append_dynamics, 只桩掉抓取/分析/commit。
 def _run_pd(report_dir, video_ok, touched, items, commit_records):
-    R.report_path = lambda ds: os.path.join(report_dir, f"{ds}.md")
+    _rp = lambda ds: os.path.join(report_dir, f"{ds}.md")
+    _saved_rp = (R.report_path, M.report_path)
+    R.report_path = _rp
+    M.report_path = _rp          # monitor 用的是自己的绑定, 只改 R 不够
     saved = (M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics)
     M.collect_dynamics = lambda cfg: {"status": "ok", "new": items}
     M.analyze_dynamic = lambda cfg, k, d: "看多"
@@ -780,6 +784,7 @@ def _run_pd(report_dir, video_ok, touched, items, commit_records):
                                        "KEY", video_ok, touched)
     finally:
         M.collect_dynamics, M.analyze_dynamic, M.commit_dynamics = saved
+        R.report_path, M.report_path = _saved_rp
     return added, buf.getvalue()
 
 

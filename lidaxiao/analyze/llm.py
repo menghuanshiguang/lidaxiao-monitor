@@ -1,17 +1,21 @@
 """LLM 分析层: 提示词构造 / 云端调用 / CLI 通道 / 结果整形 —— 从 monitor.py 抽出"""
 import datetime
 import glob
+import json
 import os
 import shutil
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 
 from lidaxiao.common import CN_TZ, WORKDIR
 from lidaxiao.prompts import (ANALYZE_SYSTEM, DYNAMIC_SYSTEM, REPORT_SECTIONS,
                               REPORT_TAIL)
 from lidaxiao.textutil import log, read_text
-from lidaxiao.config import FREE_PROVIDER, load_llm_key  # noqa: E402
+from lidaxiao.config import (  # noqa: E402
+    FREE_GATEWAY_PROVIDER, FREE_PROVIDER, load_llm_key)
 from lidaxiao.llmio import (  # noqa: F401 - 文本通道自用的公共件 (视觉通道直接用 llmio)
     _apply_thinking, _find_cli_path, _free_lane_post, _warn_model)
 
@@ -67,6 +71,72 @@ def _call_ollama_native(pcfg, system, user):
     return (j.get("message", {}).get("content") or "").strip()
 
 
+def free_gateway_models(base_url, timeout=20):
+    """GET {base_url}/models -> 当前**请求时刻**的 -free id 列表(绝不写死)。"""
+    url = base_url.rstrip("/") + "/models"
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+    except Exception as e:
+        raise RuntimeError(f"免费车道模型列表取不到({url}): {type(e).__name__}: {e}")
+    ids = [m.get("id") for m in (data.get("data") or []) if isinstance(m, dict)]
+    return [i for i in ids if i and i.endswith("-free")]
+
+
+def free_gateway_model(pcfg):
+    """本次要用的模型 id: 配置里写了就用它, 空则取列表里第一个 -free。"""
+    if pcfg.get("model"):
+        return pcfg["model"]
+    if pcfg.get("_model_cache"):
+        return pcfg["_model_cache"]
+    ids = free_gateway_models(pcfg.get("base_url", ""),
+                             timeout=pcfg.get("list_timeout", 20))
+    if not ids:
+        raise RuntimeError("免费车道的模型列表里没有任何 -free id")
+    pcfg["_model_cache"] = ids[0]
+    log(f"ℹ️ free 网关模型列表: {len(ids)} 个 -free, 本次用 {ids[0]}")
+    return ids[0]
+
+
+def _call_free_gateway(pcfg, system, user):
+    """本机 dsh-opencode-free 网关: OpenAI 兼容 /chat/completions, 无鉴权, 非流式。"""
+    model = free_gateway_model(pcfg)
+    url = pcfg["base_url"].rstrip("/") + "/chat/completions"
+    payload = {"model": model,
+               "messages": [{"role": "system", "content": system},
+                            {"role": "user", "content": user}],
+               "stream": False,
+               "max_tokens": pcfg.get("max_tokens", 4000)}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                 method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=pcfg.get("timeout", 300)) as r:
+            raw = r.read().decode("utf-8", "replace")
+            status = getattr(r, "status", 200)
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:300]
+        except Exception:
+            pass
+        raise RuntimeError(f"free 网关 HTTP {e.code}: {body}")
+    except Exception as e:
+        raise RuntimeError(f"free 网关不可达: {type(e).__name__}: {e}")
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise RuntimeError(f"free 网关返回非 JSON (HTTP {status}): {raw[:200]}")
+    try:
+        text = data["choices"][0]["message"]["content"]
+    except Exception:
+        raise RuntimeError(f"free 网关返回体没有 choices[0].message.content: {raw[:200]}")
+    log(f"✅ free 通道成功 (model={model}, HTTP {status}, {len(text or '')} 字)")
+    return (text or "").strip()
+
+
 def _call_llm_once(pcfg, api_key, system, user):
     """向单个 LLM provider 发起一次 Chat Completions 请求"""
     if pcfg.get("mode") == "json":
@@ -77,6 +147,8 @@ def _call_llm_once(pcfg, api_key, system, user):
     import requests
     _warn_model(pcfg)
     url = pcfg["base_url"].rstrip("/") + "/chat/completions"
+    if pcfg.get("provider") == FREE_GATEWAY_PROVIDER:
+        return _call_free_gateway(pcfg, system, user)
     if pcfg.get("provider") == FREE_PROVIDER:
         # 免密车道: 非流式必挂, 走流式 + 指纹头 + decoy tools
         return _free_lane_post(pcfg, {
@@ -294,8 +366,10 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
                 and local.get("position", "first") == "first"):
             providers.append(local)            # 本地优先: 校验不过自动回落云端
         free = cfg.get("llm_free")
-        if free and free.get("enabled", True):
-            providers.append(free)             # 免费层最前, 挂了自动落到下面三级
+        force_free = (os.environ.get("LIDAXIAO_LLM") or "").strip().lower() == "free"
+        if free and free.get("enabled", True) and force_free:
+            providers.append(free)             # LIDAXIAO_LLM=free: 本次强制走免费车道
+            log("ℹ️ LIDAXIAO_LLM=free: 本次优先使用免费车道(本机 dsh-opencode-free 网关)")
         providers.append(cfg.get("llm"))
         cli = cfg.get("llm_cli")
         if cli and cli.get("provider") != cfg.get("llm", {}).get("provider"):
@@ -303,10 +377,12 @@ def call_llm(cfg, api_key, system, user, dsc_prompt=None):
         fallback = cfg.get("llm_fallback")
         if fallback and fallback.get("provider") != cfg.get("llm", {}).get("provider"):
             providers.append(fallback)
+        if free and free.get("enabled", True) and not force_free:
+            providers.append(free)             # 默认 fallback: 主通道 402/失败时切到免费车道
         if (local and local.get("enabled") and local.get("position") == "last"
                 and _local_llm_alive(local)):
             providers.append(local)            # 可选: position=last 时退居兜底
-    NO_KEY_PROVIDERS = {"ollama", "local", "llama"}
+    NO_KEY_PROVIDERS = {"ollama", "local", "llama", FREE_GATEWAY_PROVIDER}
     last_err = ""
     for pcfg in providers:
         if not pcfg:
