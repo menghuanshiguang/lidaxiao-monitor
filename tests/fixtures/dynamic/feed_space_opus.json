@@ -1,0 +1,659 @@
+{
+ "code": 0,
+ "message": "0",
+ "ttl": 1,
+ "data": {
+  "update_num": "0",
+  "update_baseline": "",
+  "offset": "1272778807620665396",
+  "has_more": true,
+  "total": "0",
+  "items": [
+   {
+    "id_str": "1242349458269667351",
+    "type": "DYNAMIC_TYPE_AV",
+    "basic": {
+     "rid_str": "117184609131136",
+     "comment_type": 1,
+     "comment_id_str": "117184609131136",
+     "like_icon": {
+      "id": "0",
+      "start_url": "",
+      "action_url": "",
+      "end_url": ""
+     },
+     "in_audit": false,
+     "is_only_fans": false,
+     "editable": false,
+     "open_app_extra": "",
+     "jump_url": "",
+     "aigc": false
+    },
+    "visible": true,
+    "modules": {
+     "module_tag": {
+      "text": "置顶"
+     },
+     "module_author": {
+      "type": "AUTHOR_TYPE_NORMAL",
+      "avatar": {
+       "container_size": {
+        "width": 1.35,
+        "height": 1.35
+       },
+       "layers": [],
+       "fallback_layers": {
+        "group_id": "",
+        "layers": [
+         {
+          "layer_id": "",
+          "visible": true,
+          "general_spec": {
+           "pos_spec": {
+            "coordinate_pos": 2,
+            "axis_x": 0.675,
+            "axis_y": 0.675
+           },
+           "size_spec": {
+            "width": 1,
+            "height": 1
+           },
+           "render_spec": {
+            "opacity": 1
+           }
+          },
+          "layer_config": {
+           "tags": {
+            "AVATAR_LAYER": {
+             "config_type": 0
+            },
+            "GENERAL_CFG": {
+             "config_type": 1,
+             "general_config": {
+              "web_css_style": {
+               "borderRadius": "50%"
+              }
+             }
+            }
+           },
+           "is_critical": true,
+           "allow_over_paint": false,
+           "layer_mask": null
+          },
+          "resource": {
+           "res_type": 3,
+           "res_image": {
+            "image_src": {
+             "src_type": 1,
+             "placeholder": 6,
+             "remote": {
+              "url": "https://i1.hdslb.com/bfs/face/36c6c582f0b54245fbc5e4abfca2615963891369.jpg",
+              "bfs_style": "widget-layer-avatar"
+             }
+            }
+           }
+          }
+         },
+         {
+          "layer_id": "",
+          "visible": true,
+          "general_spec": {
+           "pos_spec": {
+            "coordinate_pos": 1,
+            "axis_x": 0.8000000000000002,
+            "axis_y": 0.8000000000000002
+           },
+           "size_spec": {
+            "width": 0.41666666666666663,
+            "height": 0.41666666666666663
+           },
+           "render_spec": {
+            "opacity": 1
+           }
+          },
+          "layer_config": {
+           "tags": {
+            "GENERAL_CFG": {
+             "config_type": 1,
+             "general_config": {
+              "web_css_style": {
+               "background-color": "rgb(255,255,255)",
+               "border": "2px solid rgba(255,255,255,1)",
+               "borderRadius": "50%",
+               "boxSizing": "border-box"
+              }
+             }
+            },
+            "ICON_LAYER": {
+             "config_type": 0
+            }
+           },
+           "is_critical": false,
+           "allow_over_paint": false,
+           "layer_mask": null
+          },
+          "resource": {
+           "res_type": 3,
+           "res_image": {
+            "image_src": {
+             "src_type": 2,
+             "placeholder": 0,
+             "local": 3
+            }
+           }
+          }
+         }
+        ],
+        "group_mask": null,
+        "is_critical_group": true
+       },
+       "mid": "2137589551"
+      },
+      "face": "https://i1.hdslb.com/bfs/face/36c6c582f0b54245fbc5e4abfca2615963891369.jpg",
+      "face_nft": false,
+      "nft_info": null,
+      "name": "李大霄",
+      "name_render": null,
+      "label": "",
+      "mid": 2137589551,
+      "jump_url": "//space.bilibili.com/2137589551/dynamic",
+      "following": null,
+      "pub_ts": "1788095424",
+      "pub_time": "8月30日",
+      "pub_action": "投稿了视频",
+      "pub_location_text": "",
+      "pendant": {
+       "pid": 0,
+       "name": "",
+       "image": "",
+       "expire": "0",
+       "image_enhance": "",
+       "image_enhance_frame": "",
+       "n_pid": "0"
+      },
+      "vip": {
+       "type": 2,
+       "status": 1,
+       "due_date": "1822406400000",
+       "vip_pay_type": 0,
+       "theme_type": 0,
+       "label": {
+        "path": "http://i0.hdslb.com/bfs/vip/label_annual.png",
+        "text": "年度大会员",
+        "label_theme": "annual_vip",
+        "text_color": "#FFFFFF",
+        "bg_style": 1,
+        "bg_color": "#FB7299",
+        "border_color": "",
+        "use_img_label": true,
+        "img_label_uri_hans": "https://i0.hdslb.com/bfs/activity-plat/static/20220608/e369244d0b14644f5e1a06431e22a4d5/0DFy9BHgwE.gif",
+        "img_label_uri_hant": "",
+        "img_label_uri_hans_static": "https://i0.hdslb.com/bfs/vip/8d7e624d13d3e134251e4174a7318c19a8edbd71.png",
+        "img_label_uri_hant_static": "https://i0.hdslb.com/bfs/activity-plat/static/20220614/e369244d0b14644f5e1a06431e22a4d5/uckjAv3Npy.png"
+       },
+       "avatar_subscript": 1,
+       "nickname_color": "#FB7299",
+       "role": "3",
+       "avatar_subscript_url": "",
+       "tv_vip_status": 1,
+       "tv_vip_pay_type": 0,
+       "tv_due_date": "1822406400",
+       "avatar_icon": {
+        "icon_type": 1,
+        "icon_resource": {
+         "type": 0,
+         "url": ""
+        }
+       }
+      },
+      "official_verify": {
+       "type": 0,
+       "desc": ""
+      },
+      "decorate": null,
+      "decoration_card": null,
+      "is_top": false,
+      "icon_badge": null,
+      "views_text": "",
+      "official": null,
+      "more": null,
+      "decorate_card": null,
+      "identity_badges": []
+     },
+     "module_more": {
+      "rcmd_text": "",
+      "three_point_items": [
+       {
+        "label": "举报",
+        "type": "THREE_POINT_REPORT",
+        "params": {},
+        "modal": null,
+        "jump_url": ""
+       }
+      ]
+     },
+     "module_dispute": null,
+     "module_dynamic": {
+      "topic": null,
+      "desc": null,
+      "major": {
+       "type": "MAJOR_TYPE_ARCHIVE",
+       "none": null,
+       "blocked": null,
+       "archive": {
+        "type": 1,
+        "bvid": "BV1uEtH6mEY6",
+        "aid": "117184609131136",
+        "cover": "http://i2.hdslb.com/bfs/archive/9267de01cb838a9eeb0de4263d4a0e159994f3df.jpg",
+        "jump_url": "//www.bilibili.com/video/BV1uEtH6mEY6",
+        "stat": {
+         "danmaku": "115",
+         "play": "13.8万",
+         "vt": ""
+        },
+        "duration_text": "04:20",
+        "title": "提醒11月3日对美股的风险",
+        "desc": "一键三连！",
+        "badge": {
+         "icon_url": "",
+         "text": "投稿视频",
+         "bg_color": "#FB7299",
+         "color": "#FFFFFF"
+        },
+        "enable_vt": 0,
+        "disable_preview": 0,
+        "premiere_online": "",
+        "stat_hidden": 0
+       },
+       "pgc": null,
+       "courses": null,
+       "draw": null,
+       "article": null,
+       "music": null,
+       "common": null,
+       "upower_common": null,
+       "live": null,
+       "live_rcmd": null,
+       "medialist": null,
+       "subscription": null,
+       "ugc_season": null,
+       "subscription_new": null,
+       "opus": null
+      },
+      "additional": null
+     },
+     "module_extend": null,
+     "module_stat": {
+      "forward": {
+       "status": false,
+       "count": 15,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "comment": {
+       "status": false,
+       "count": 1191,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "like": {
+       "status": false,
+       "count": 2817,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "coin": null,
+      "favorite": null
+     },
+     "module_interaction": null,
+     "module_share_info": null,
+     "module_fold": null
+    },
+    "orig": null
+   },
+   {
+    "id_str": "1273504300584140805",
+    "type": "DYNAMIC_TYPE_DRAW",
+    "basic": {
+     "rid_str": "416430088",
+     "comment_type": 11,
+     "comment_id_str": "416430088",
+     "like_icon": {
+      "id": "0",
+      "start_url": "",
+      "action_url": "",
+      "end_url": ""
+     },
+     "in_audit": false,
+     "is_only_fans": false,
+     "editable": false,
+     "open_app_extra": "",
+     "jump_url": "//www.bilibili.com/opus/1273504300584140805",
+     "aigc": false
+    },
+    "visible": true,
+    "modules": {
+     "module_tag": null,
+     "module_author": {
+      "type": "AUTHOR_TYPE_NORMAL",
+      "avatar": {
+       "container_size": {
+        "width": 1.35,
+        "height": 1.35
+       },
+       "layers": [],
+       "fallback_layers": {
+        "group_id": "",
+        "layers": [
+         {
+          "layer_id": "",
+          "visible": true,
+          "general_spec": {
+           "pos_spec": {
+            "coordinate_pos": 2,
+            "axis_x": 0.675,
+            "axis_y": 0.675
+           },
+           "size_spec": {
+            "width": 1,
+            "height": 1
+           },
+           "render_spec": {
+            "opacity": 1
+           }
+          },
+          "layer_config": {
+           "tags": {
+            "AVATAR_LAYER": {
+             "config_type": 0
+            },
+            "GENERAL_CFG": {
+             "config_type": 1,
+             "general_config": {
+              "web_css_style": {
+               "borderRadius": "50%"
+              }
+             }
+            }
+           },
+           "is_critical": true,
+           "allow_over_paint": false,
+           "layer_mask": null
+          },
+          "resource": {
+           "res_type": 3,
+           "res_image": {
+            "image_src": {
+             "src_type": 1,
+             "placeholder": 6,
+             "remote": {
+              "url": "https://i1.hdslb.com/bfs/face/36c6c582f0b54245fbc5e4abfca2615963891369.jpg",
+              "bfs_style": "widget-layer-avatar"
+             }
+            }
+           }
+          }
+         },
+         {
+          "layer_id": "",
+          "visible": true,
+          "general_spec": {
+           "pos_spec": {
+            "coordinate_pos": 1,
+            "axis_x": 0.8000000000000002,
+            "axis_y": 0.8000000000000002
+           },
+           "size_spec": {
+            "width": 0.41666666666666663,
+            "height": 0.41666666666666663
+           },
+           "render_spec": {
+            "opacity": 1
+           }
+          },
+          "layer_config": {
+           "tags": {
+            "GENERAL_CFG": {
+             "config_type": 1,
+             "general_config": {
+              "web_css_style": {
+               "background-color": "rgb(255,255,255)",
+               "border": "2px solid rgba(255,255,255,1)",
+               "borderRadius": "50%",
+               "boxSizing": "border-box"
+              }
+             }
+            },
+            "ICON_LAYER": {
+             "config_type": 0
+            }
+           },
+           "is_critical": false,
+           "allow_over_paint": false,
+           "layer_mask": null
+          },
+          "resource": {
+           "res_type": 3,
+           "res_image": {
+            "image_src": {
+             "src_type": 2,
+             "placeholder": 0,
+             "local": 3
+            }
+           }
+          }
+         }
+        ],
+        "group_mask": null,
+        "is_critical_group": true
+       },
+       "mid": "2137589551"
+      },
+      "face": "https://i1.hdslb.com/bfs/face/36c6c582f0b54245fbc5e4abfca2615963891369.jpg",
+      "face_nft": false,
+      "nft_info": null,
+      "name": "李大霄",
+      "name_render": null,
+      "label": "",
+      "mid": 2137589551,
+      "jump_url": "//space.bilibili.com/2137589551/dynamic",
+      "following": null,
+      "pub_ts": "1795349226",
+      "pub_time": "2天前",
+      "pub_action": "",
+      "pub_location_text": "",
+      "pendant": {
+       "pid": 0,
+       "name": "",
+       "image": "",
+       "expire": "0",
+       "image_enhance": "",
+       "image_enhance_frame": "",
+       "n_pid": "0"
+      },
+      "vip": {
+       "type": 2,
+       "status": 1,
+       "due_date": "1822406400000",
+       "vip_pay_type": 0,
+       "theme_type": 0,
+       "label": {
+        "path": "http://i0.hdslb.com/bfs/vip/label_annual.png",
+        "text": "年度大会员",
+        "label_theme": "annual_vip",
+        "text_color": "#FFFFFF",
+        "bg_style": 1,
+        "bg_color": "#FB7299",
+        "border_color": "",
+        "use_img_label": true,
+        "img_label_uri_hans": "https://i0.hdslb.com/bfs/activity-plat/static/20220608/e369244d0b14644f5e1a06431e22a4d5/0DFy9BHgwE.gif",
+        "img_label_uri_hant": "",
+        "img_label_uri_hans_static": "https://i0.hdslb.com/bfs/vip/8d7e624d13d3e134251e4174a7318c19a8edbd71.png",
+        "img_label_uri_hant_static": "https://i0.hdslb.com/bfs/activity-plat/static/20220614/e369244d0b14644f5e1a06431e22a4d5/uckjAv3Npy.png"
+       },
+       "avatar_subscript": 1,
+       "nickname_color": "#FB7299",
+       "role": "3",
+       "avatar_subscript_url": "",
+       "tv_vip_status": 1,
+       "tv_vip_pay_type": 0,
+       "tv_due_date": "1822406400",
+       "avatar_icon": {
+        "icon_type": 1,
+        "icon_resource": {
+         "type": 0,
+         "url": ""
+        }
+       }
+      },
+      "official_verify": {
+       "type": 0,
+       "desc": ""
+      },
+      "decorate": null,
+      "decoration_card": null,
+      "is_top": false,
+      "icon_badge": null,
+      "views_text": "",
+      "official": null,
+      "more": null,
+      "decorate_card": null,
+      "identity_badges": []
+     },
+     "module_more": {
+      "rcmd_text": "",
+      "three_point_items": [
+       {
+        "label": "举报",
+        "type": "THREE_POINT_REPORT",
+        "params": {},
+        "modal": null,
+        "jump_url": ""
+       }
+      ]
+     },
+     "module_dispute": null,
+     "module_dynamic": {
+      "topic": null,
+      "desc": null,
+      "major": {
+       "type": "MAJOR_TYPE_OPUS",
+       "none": null,
+       "blocked": null,
+       "archive": null,
+       "pgc": null,
+       "courses": null,
+       "draw": null,
+       "article": null,
+       "music": null,
+       "common": null,
+       "upower_common": null,
+       "live": null,
+       "live_rcmd": null,
+       "medialist": null,
+       "subscription": null,
+       "ugc_season": null,
+       "subscription_new": null,
+       "opus": {
+        "jump_url": "//www.bilibili.com/opus/1273504300584140805",
+        "title": "",
+        "summary": {
+         "text": "李大霄：救市组合拳有助于加速市场稳定 市场或会起稳定反应\n\n截止到2026年11月22日19：26分，利好消息为：\n\n1）降低融资门槛。沪深北交易所把融资买入证券的最低保证金比例从100% 降到了80%。与2026年1月14日中午从80%提升100%相对应。这举措能够减缓连环平仓给市场带来的压力，实现逆周期调节之目的。只不过该举措并非鼓励加杠杆。投资者特别是散户投资者要理性看待，价值投资理性投资量力而为。\n\n2）上交所、深交所、宣布降费：要进一步减免相关的交易费用，2026年直接降成本24、22亿元。\n\n3）中国结算暂免部分费用：连中国结算也出手了，宣布暂免收取部分债券登记结算的费用。\n\n这个周末中韩台（地区）都在救市。\n\n韩国政府救市政策：准备启动股市稳定基金，放宽回购限制、打击非法卖空。\n\n中国台湾地区救市政策：下周一起全面禁止平盘以下放空，连融券保证金和借券都全线收紧。\n\n\n以上消息皆为稳定市场的重大举措，有助于市场稳定，多个市场一起救市，有助于抵御输入性风险，隔断悲观气氛传染，希望我们最有实力的机构投资者负起责任，进一步加大力度形成合力救市，上市公司应多回购少减持，我们有超2亿的散户投资者，也有超8亿的基金投资者，涉及千家万户，救市刻不容缓，保护散户刻不容缓。\n\n结合前期出台六大政策利好，分别是证券基金保险互换便利、股票回购增持再贷款、护盘式回购规则优化、上市公司回购加力、主动ETF与基金产品扩容、融资融券逆周期调节。\n\n以上诸多举措非常重要，表达了稳定资本市场坚定态度，稳定市场的力量将得到加强，这是重大利好消息，市场稳定值得期待，经过大幅调整，中国部分最核心最优质的蓝筹股或已具备初步吸引力。最有实力最有能力的最大的机构投资者不应失去长期投资信心，加速稳定市场是所有市场参与者利益最大化的共同取向，也是保护投资者特别是中小投资者的必要举措，希望各方摒弃分歧尽快形成合力。\n\n市场或会起稳定反应。\n",
+         "rich_text_nodes": [
+          {
+           "text": "李大霄：救市组合拳有助于加速市场稳定 市场或会起稳定反应\n\n截止到2026年11月22日19：26分，利好消息为：\n\n1）降低融资门槛。沪深北交易所把融资买入证券的最低保证金比例从100% 降到了80%。与2026年1月14日中午从80%提升100%相对应。这举措能够减缓连环平仓给市场带来的压力，实现逆周期调节之目的。只不过该举措并非鼓励加杠杆。投资者特别是散户投资者要理性看待，价值投资理性投资量力而为。\n\n2）上交所、深交所、宣布降费：要进一步减免相关的交易费用，2026年直接降成本24、22亿元。\n\n3）中国结算暂免部分费用：连中国结算也出手了，宣布暂免收取部分债券登记结算的费用。\n\n这个周末中韩台（地区）都在救市。\n\n韩国政府救市政策：准备启动股市稳定基金，放宽回购限制、打击非法卖空。\n\n中国台湾地区救市政策：下周一起全面禁止平盘以下放空，连融券保证金和借券都全线收紧。\n\n\n以上消息皆为稳定市场的重大举措，有助于市场稳定，多个市场一起救市，有助于抵御输入性风险，隔断悲观气氛传染，希望我们最有实力的机构投资者负起责任，进一步加大力度形成合力救市，上市公司应多回购少减持，我们有超2亿的散户投资者，也有超8亿的基金投资者，涉及千家万户，救市刻不容缓，保护散户刻不容缓。\n\n结合前期出台六大政策利好，分别是证券基金保险互换便利、股票回购增持再贷款、护盘式回购规则优化、上市公司回购加力、主动ETF与基金产品扩容、融资融券逆周期调节。\n\n以上诸多举措非常重要，表达了稳定资本市场坚定态度，稳定市场的力量将得到加强，这是重大利好消息，市场稳定值得期待，经过大幅调整，中国部分最核心最优质的蓝筹股或已具备初步吸引力。最有实力最有能力的最大的机构投资者不应失去长期投资信心，加速稳定市场是所有市场参与者利益最大化的共同取向，也是保护投资者特别是中小投资者的必要举措，希望各方摒弃分歧尽快形成合力。\n\n市场或会起稳定反应。",
+           "orig_text": "李大霄：救市组合拳有助于加速市场稳定 市场或会起稳定反应\n\n截止到2026年11月22日19：26分，利好消息为：\n\n1）降低融资门槛。沪深北交易所把融资买入证券的最低保证金比例从100% 降到了80%。与2026年1月14日中午从80%提升100%相对应。这举措能够减缓连环平仓给市场带来的压力，实现逆周期调节之目的。只不过该举措并非鼓励加杠杆。投资者特别是散户投资者要理性看待，价值投资理性投资量力而为。\n\n2）上交所、深交所、宣布降费：要进一步减免相关的交易费用，2026年直接降成本24、22亿元。\n\n3）中国结算暂免部分费用：连中国结算也出手了，宣布暂免收取部分债券登记结算的费用。\n\n这个周末中韩台（地区）都在救市。\n\n韩国政府救市政策：准备启动股市稳定基金，放宽回购限制、打击非法卖空。\n\n中国台湾地区救市政策：下周一起全面禁止平盘以下放空，连融券保证金和借券都全线收紧。\n\n\n以上消息皆为稳定市场的重大举措，有助于市场稳定，多个市场一起救市，有助于抵御输入性风险，隔断悲观气氛传染，希望我们最有实力的机构投资者负起责任，进一步加大力度形成合力救市，上市公司应多回购少减持，我们有超2亿的散户投资者，也有超8亿的基金投资者，涉及千家万户，救市刻不容缓，保护散户刻不容缓。\n\n结合前期出台六大政策利好，分别是证券基金保险互换便利、股票回购增持再贷款、护盘式回购规则优化、上市公司回购加力、主动ETF与基金产品扩容、融资融券逆周期调节。\n\n以上诸多举措非常重要，表达了稳定资本市场坚定态度，稳定市场的力量将得到加强，这是重大利好消息，市场稳定值得期待，经过大幅调整，中国部分最核心最优质的蓝筹股或已具备初步吸引力。最有实力最有能力的最大的机构投资者不应失去长期投资信心，加速稳定市场是所有市场参与者利益最大化的共同取向，也是保护投资者特别是中小投资者的必要举措，希望各方摒弃分歧尽快形成合力。\n\n市场或会起稳定反应。",
+           "type": "RICH_TEXT_NODE_TYPE_TEXT",
+           "jump_url": "",
+           "icon_url": "",
+           "icon_name": "",
+           "rid": "",
+           "emoji": null,
+           "goods": null,
+           "style": null,
+           "pics": [],
+           "video": null
+          },
+          {
+           "text": "\n",
+           "orig_text": "\n",
+           "type": "RICH_TEXT_NODE_TYPE_TEXT",
+           "jump_url": "",
+           "icon_url": "",
+           "icon_name": "",
+           "rid": "",
+           "emoji": null,
+           "goods": null,
+           "style": null,
+           "pics": [],
+           "video": null
+          }
+         ],
+         "paragraphs": [],
+         "has_more": false
+        },
+        "style": 0,
+        "pics": [
+         {
+          "url": "http://i0.hdslb.com/bfs/new_dyn/1728fcb9f07b596d308c5eb10f0520952137589551.jpg",
+          "width": 1920,
+          "height": 1080,
+          "size": 315.6025390625,
+          "live_url": "",
+          "aigc": 0,
+          "warning": null
+         }
+        ],
+        "fold_action": [
+         "展开",
+         "收起"
+        ],
+        "paywall": null
+       }
+      },
+      "additional": null
+     },
+     "module_extend": null,
+     "module_stat": {
+      "forward": {
+       "status": false,
+       "count": 3,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "comment": {
+       "status": false,
+       "count": 354,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "like": {
+       "status": false,
+       "count": 554,
+       "forbidden": false,
+       "disabled": false,
+       "silent": false,
+       "hidden": false
+      },
+      "coin": null,
+      "favorite": null
+     },
+     "module_interaction": null,
+     "module_share_info": null,
+     "module_fold": null
+    },
+    "orig": null
+   }
+  ]
+ }
+}
