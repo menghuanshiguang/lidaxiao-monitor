@@ -1,5 +1,7 @@
 # lidaxiao-monitor
 
+[![auto monitor](https://img.shields.io/github/actions/workflow/status/menghuanshiguang/lidaxiao-monitor/monitor.yml?label=auto%20monitor)](https://github.com/menghuanshiguang/lidaxiao-monitor/actions)
+
 盯住李大霄的 B 站主页：新视频自动下载、抽字幕、出分析，每个交易日写成一份日报。
 
 ## 它能做什么
@@ -42,7 +44,7 @@ workflow 读四个 secret：
 
 一个密钥都不配也能跑：workflow 会自己把免费车道（`dsh-opencode-free` 网关）起起来兜底。本机想走同一条路，得自己 clone 那个仓库、装 bun、`node launch.mjs` 把网关起在 `127.0.0.1:18787`。
 
-跑完由 workflow 自己把报告提交回 `docs/reports/`。
+跑完由 workflow 自己把报告提交回 `docs/reports/`。点进任一次 run 的 step 可看原始日志。
 
 ## 输出
 
