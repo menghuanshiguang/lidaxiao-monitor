@@ -11,7 +11,7 @@
 
 ## 快速开始
 
-Python 3.12（CI 用的就是 3.12）。下载器没有 pip 包，要手工预置到 `_repo/`，缺了直接拿不到视频列表：
+Python 3.12（CI 用的就是 3.12）、git、ffmpeg（放 `tools/ffmpeg/bin/` 或加进 PATH；缺了抽帧会静默失败，报告照样出，但里面没有字幕分析）。下载器没有 pip 包，要手工预置到 `_repo/`，缺了直接拿不到视频列表：
 
 ```bash
 git clone https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
@@ -29,7 +29,7 @@ python3 monitor.py --check-vision  # 只自检片尾视觉模型，不下载不�
 
 `config.json` 里改一项就够：`"uid"` —— 要盯的 UP 主，默认 `2137589551`（李大霄）。
 
-其余是各条分析通道的开关与顺序。密钥都从环境变量读，缺了自动跳过那条通道，不中断流程。
+其余是各条分析通道的开关与顺序。密钥从环境变量读，也可以写在仓库根的 `.env` 里；缺了自动跳过那条通道，不中断流程。
 
 ## 自动运行
 
