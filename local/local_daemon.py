@@ -248,8 +248,12 @@ def run_monitor(args, local=True):
     try:
         r = subprocess.run(cmd, cwd=WORKDIR, env=env, check=False)
         log(f"  -> monitor 退出码={r.returncode}")
+        # 必须把退出码交回去: 只 log 不返回的话, 云端入口拿不到失败,
+        # monitor 崩了 job 照样是绿的(2026-11-26 run 45764668848 就是这样)。
+        return r.returncode
     except Exception as e:
         log(f"❌ 本地 monitor 运行异常: {e}")
+        return 1
 
 
 def _ensure_git_user():
