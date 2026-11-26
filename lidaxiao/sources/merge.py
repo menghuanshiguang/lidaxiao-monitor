@@ -63,28 +63,44 @@ def title_similarity(a, b):
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
-def epoch_of(value):
-    """时间 -> epoch 秒。认 int/float 与 ISO 8601 字符串; 认不出返回 None。
+def _seconds(value):
+    """把可能是毫秒/微秒的时间戳归一到秒。
 
-    两种形状是**真实并存**的: 生产端 `weibo.parse_card` 给的是 `1726747827`(int),
-    而导出的 `match-input.json` 给的是 `'2024-09-19T20:10:27+08:00'`(str)。
-    只认数字的后果不是报错, 而是静默——先全是"未匹配"(9 条微博视频全当独有重下),
-    加了超窗规则后变成全是"stale"排除(一条都不下)。两种都是漏采/重复,
-    而且日志上看不出来, 所以这里必须两种都认。
+    秒级 epoch 要到公元 5138 年才够到 1e11, 所以 >= 1e11 只可能是更细的单位;
+    逐次除以 1000 落回秒级即可 (毫秒 1 次、微秒 2 次、纳秒 3 次)。
+    """
+    n = 0
+    while abs(value) >= 1e11 and n < 4:
+        value /= 1000.0
+        n += 1
+    return value
+
+
+def epoch_of(value):
+    """时间 -> epoch 秒。认 int/float、纯数字字符串、ISO 8601 字符串; 认不出返回 None。
+
+    三种形状都真实会碰到: 生产端 `weibo.parse_card` 给 `1726747827`(int), 导出的
+    `match-input.json` 给 `'2024-09-19T20:10:27+08:00'`(ISO 串), 而从 CSV/JSON 里读回来
+    的时间常是 `'1795604547'`(数字串)。只认一种的后果**不是报错而是静默**: 先全判
+    "未匹配"(微博独有视频全被当成独有重下一遍), 加了超窗规则后变成全判 stale
+    (一条都不下)。两种都是漏采/重复, 而且日志上看不出来, 所以这里三种都认。
     """
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        return _seconds(float(value))
     if isinstance(value, str) and value.strip():
         text = value.strip().replace("Z", "+00:00")
         try:
             dt = datetime.datetime.fromisoformat(text)
         except ValueError:
-            return None
-        if dt.tzinfo is None:              # 裸时间按北京时间算 (本项目只有这一个时区)
+            try:
+                return _seconds(float(text))        # '1795604547' / '1795604547.5'
+            except ValueError:
+                return None
+        if dt.tzinfo is None:                       # 裸时间按北京时间算 (本项目唯一时区)
             dt = dt.replace(tzinfo=CN_TZ)
-        return dt.timestamp()
+        return float(dt.timestamp())
     return None
 
 

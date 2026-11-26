@@ -235,5 +235,19 @@ chk("ISO 形状下 D=1", iso_plan["counts"]["matched"] == 1, iso_plan["counts"])
 chk("ISO 形状也能换成 pubdate 数字",
     isinstance(G.as_video_item(ISO_W[0])["pubdate"], int), G.as_video_item(ISO_W[0]))
 
+# 残余形状 (验收员 2026-11-26 点出): 数字字符串与毫秒时间戳, 同样不许静默判 stale
+chk("数字字符串认成时间", G.epoch_of("1795604547") == float(T0), G.epoch_of("1795604547"))
+chk("数字字符串求差不炸", G._hours(T0, "1795604547") == 0.0)
+chk("毫秒时间戳归一到秒", G.epoch_of(1795604547000) == float(T0))
+chk("微秒时间戳归一到秒", G.epoch_of(1795604547000000) == float(T0))
+chk("毫秒不会因为超窗被误判 stale",
+    G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
+                  now=T0 + 61800 + 3600)["counts"]["queue"] == 0
+    and G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
+                      now=T0 + 61800 + 3600)["counts"]["matched"] == 1,
+    G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
+                  now=T0 + 61800 + 3600)["counts"])
+chk("布尔不当时间 (True 不是 1 秒)", G.epoch_of(True) is None)
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
