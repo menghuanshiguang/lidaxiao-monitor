@@ -5,21 +5,25 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: bare-python weibo probe (no cookie)
+      - name: weibo probe with visitor cookie from secret
+        env:
+          WEIBO_SUB: ${{ secrets.WEIBO_SUB }}
         run: |
           python3 -u - <<'PY'
-          import ssl, urllib.request, urllib.error, json
+          import os, sys, ssl, json, hashlib, urllib.request, urllib.error
+          ck = os.environ.get("WEIBO_SUB", "")
+          print("python", sys.version.split()[0], "| openssl", ssl.OPENSSL_VERSION, flush=True)
+          print(f"[secret] present={bool(ck)} bytes={len(ck)} sha256_8={hashlib.sha256(ck.encode()).hexdigest()[:8]}", flush=True)
+
           UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
                 "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
-          import sys
-          print("python", sys.version.split()[0], "| openssl", ssl.OPENSSL_VERSION, flush=True)
 
-          def get(url, extra=None, timeout=30):
+          def get(url, use_cookie=True, timeout=30):
               h = {"User-Agent": UA, "Accept": "application/json, text/plain, */*",
                    "Referer": "https://m.weibo.cn/u/1645823934",
                    "X-Requested-With": "XMLHttpRequest", "MWeibo-Pwa": "1"}
-              if extra:
-                  h.update(extra)
+              if use_cookie and ck:
+                  h["Cookie"] = ck
               req = urllib.request.Request(url, headers=h)
               try:
                   r = urllib.request.urlopen(req, timeout=timeout)
@@ -29,27 +33,30 @@ jobs:
               except Exception as e:
                   return None, {}, repr(e).encode()
 
-          st, _, body = get("https://api.ipify.org?format=json")
-          print(f"[egress] status={st} body={body[:120]!r}", flush=True)
+          st, _, body = get("https://api.ipify.org?format=json", use_cookie=False)
+          print(f"[egress] status={st} body={body[:80]!r}", flush=True)
 
-          for label, url in [
-              ("config", "https://m.weibo.cn/api/config"),
-              ("getIndex", "https://m.weibo.cn/api/container/getIndex?type=uid&value=1645823934&containerid=1076031645823934"),
-          ]:
-              st, hdrs, body = get(url)
-              txt = body.decode("utf-8", "replace")
-              info = ""
-              try:
-                  j = json.loads(txt)
-                  if label == "config":
-                      info = f" ok={j.get('ok')} login={j.get('data',{}).get('login') if isinstance(j.get('data'),dict) else j.get('login')}"
-                  else:
-                      cards = (j.get("data") or {}).get("cards") or []
-                      info = f" ok={j.get('ok')} cards={len(cards)}"
-                      ci = (j.get("data") or {}).get("cardlistInfo") or {}
-                      info += f" containerid={ci.get('containerid')} total={ci.get('total')} page={ci.get('page')}"
-              except Exception:
-                  pass
-              print(f"[{label}] status={st} bytes={len(body)}{info} server={hdrs.get('Server')}", flush=True)
-              print(f"[{label}] body[:200]={txt[:200]!r}", flush=True)
+          st, hdrs, body = get("https://m.weibo.cn/api/config")
+          txt = body.decode("utf-8", "replace")
+          try:
+              j = json.loads(txt); dd = j.get("data") or {}
+              print(f"[config] status={st} bytes={len(body)} ok={j.get('ok')} login={dd.get('login')}", flush=True)
+          except Exception:
+              print(f"[config] status={st} bytes={len(body)} body[:200]={txt[:200]!r}", flush=True)
+
+          url = ("https://m.weibo.cn/api/container/getIndex?type=uid&value=1645823934"
+                 "&containerid=1076031645823934")
+          st, hdrs, body = get(url)
+          txt = body.decode("utf-8", "replace")
+          try:
+              j = json.loads(txt); dd = j.get("data") or {}
+              cards = dd.get("cards") or []
+              ci = dd.get("cardlistInfo") or {}
+              print(f"[getIndex] status={st} bytes={len(body)} ok={j.get('ok')} cards={len(cards)} "
+                    f"containerid={ci.get('containerid')} total={ci.get('total')} page={ci.get('page')}", flush=True)
+              mbs = [c.get("mblog") for c in cards if c.get("mblog")]
+              print(f"[getIndex] mblog={len(mbs)} first={mbs[0].get('created_at') if mbs else None} "
+                    f"last={mbs[-1].get('created_at') if mbs else None}", flush=True)
+          except Exception:
+              print(f"[getIndex] status={st} bytes={len(body)} body[:200]={txt[:200]!r}", flush=True)
           PY
