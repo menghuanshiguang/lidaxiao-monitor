@@ -295,11 +295,16 @@ def download_for(cfg, video):
     """按来源下载: B 站走 bilidown + 直链兜底, 微博走微博直链(必须带 Referer)。
 
     返回值不变 —— 失败给 None, 由 process_video 判定"下载失败"并跳过。
+
+    参数形状是踩过的坑: `bilibili.download_video(cfg, bvid)` 第二参是 **bvid 字符串**
+    (它内部 `os.path.join(WORKDIR, "downloads", bvid)`), 传整个 video dict 会立刻
+    TypeError, 而且崩在队列第一支 —— 2026-11-26 线上就是这样一轮报告全没产出。
+    微博那支相反, `download_weibo_video(cfg, item)` 要的是整个 item (id + 直链)。
     """
+    bvid = video["bvid"]
     if (video or {}).get("source") == "weibo":
-        return (find_downloaded_weibo(video["bvid"])
-                or download_weibo_video(cfg, video))
-    return find_downloaded_mp4(video["bvid"]) or download_video(cfg, video)
+        return find_downloaded_weibo(bvid) or download_weibo_video(cfg, video)
+    return find_downloaded_mp4(bvid) or download_video(cfg, bvid)
 
 
 def process_video(cfg, api_key, video):
@@ -557,8 +562,14 @@ def main():
         #     微博只补 B 站没有的; 置顶/超窗/已处理的一律不进队列。
         wsnap, plan = weibo_round(cfg, space, done)
         wqueue = [as_video_item(i) for i in plan["queue"]]
+        # 池 = 本次 B 站列表条数(= 跨源配对能看到的全部 B 站条目)。它必须大于微博
+        # 窗口内他 B 站的发布量, 否则窗口外的旧片会被当成"微博独有"再下一遍。
         log(f"队列: bili={len(candidates)} weibo={len(wqueue)} "
-            f"合计={len(candidates) + len(wqueue)}")
+            f"合计={len(candidates) + len(wqueue)} ｜ B站池={len(space)}")
+        # 决策用的六个数在**开跑前**就打一次: 2026-11-26 那次队列第一支就崩,
+        # 结果督查要的合并行到死都没印出来, 事后只能靠猜。跑完再打一次带 S/F 的。
+        log(format_list_counts(len(candidates), plan["counts"],
+                               wsnap.get("cards"), wsnap.get("videos")))
 
         # 3. 逐个处理: B 站队列在前 (这段与接入微博前逐字相同), 微博补在后
         succeeded, failed = run_queue(cfg, api_key, candidates, touched)

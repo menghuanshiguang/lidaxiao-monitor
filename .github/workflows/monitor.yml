@@ -224,6 +224,12 @@ jobs:
             python lidaxiao.py --once --force
           }
           else { python lidaxiao.py --once }
+          # 子进程退出码必须传出去: 2026-11-26 那次 monitor 退出码=1、报告一份都没产出,
+          # job 却是绿的 —— 于是 "run success" 根本不等于 "报告产出", 不翻日志就会当成通过。
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::monitor 退出码=$LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
 
       - name: Stop opencode free gateway
         if: always()
