@@ -17,6 +17,7 @@
     进了 6 小时窗 (上面 0.667 那对就是样本), 0.6 会把两条并成一条 —— 那是**缺漏**,
     比重复更难发现。阈值可经 config weibo.sim_threshold 覆盖。
 """
+import datetime
 import re
 import time
 import unicodedata
@@ -62,10 +63,36 @@ def title_similarity(a, b):
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
-def _hours(ts_a, ts_b):
-    if not isinstance(ts_a, (int, float)) or not isinstance(ts_b, (int, float)):
+def epoch_of(value):
+    """时间 -> epoch 秒。认 int/float 与 ISO 8601 字符串; 认不出返回 None。
+
+    两种形状是**真实并存**的: 生产端 `weibo.parse_card` 给的是 `1726747827`(int),
+    而导出的 `match-input.json` 给的是 `'2024-09-19T20:10:27+08:00'`(str)。
+    只认数字的后果不是报错, 而是静默——先全是"未匹配"(9 条微博视频全当独有重下),
+    加了超窗规则后变成全是"stale"排除(一条都不下)。两种都是漏采/重复,
+    而且日志上看不出来, 所以这里必须两种都认。
+    """
+    if isinstance(value, bool):
         return None
-    return abs(float(ts_a) - float(ts_b)) / 3600.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:              # 裸时间按北京时间算 (本项目只有这一个时区)
+            dt = dt.replace(tzinfo=CN_TZ)
+        return dt.timestamp()
+    return None
+
+
+def _hours(ts_a, ts_b):
+    a, b = epoch_of(ts_a), epoch_of(ts_b)
+    if a is None or b is None:
+        return None
+    return abs(a - b) / 3600.0
 
 
 def match_item(weibo_item, bili_items, window_hours=None, threshold=None):
@@ -173,8 +200,8 @@ def format_counts(counts, ok=None, fail=None):
 
 def window_span(items):
     """微博窗口的首末时间与跨度小时数 —— 「无缺漏」的上限靠它, 不是 17.6 小时这个数。"""
-    stamps = [i.get("created_at") for i in (items or [])
-              if isinstance(i.get("created_at"), (int, float))]
+    stamps = [t for t in (epoch_of(i.get("created_at")) for i in (items or []))
+              if t is not None]
     if not stamps:
         return {"first": None, "last": None, "hours": None, "count": 0}
     return {"first": min(stamps), "last": max(stamps),
@@ -205,7 +232,7 @@ def as_video_item(item):
         "id": str(item.get("id") or ""),
         "bvid": weibo_key(item),
         "title": str(item.get("title") or "").strip() or "（微博视频无标题）",
-        "pubdate": item.get("created_at") or int(time.time()),
+        "pubdate": int(epoch_of(item.get("created_at")) or time.time()),
         "duration": dur,
         "dur_str": f"{int(dur // 60):02d}:{int(dur % 60):02d}" if dur else "",
         "video_url": item.get("video_url") or "",
@@ -238,10 +265,10 @@ def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=N
         if row["bvid"]:
             buckets["matched"] += 1
             continue
-        ts = item.get("created_at")
+        ts = epoch_of(item.get("created_at"))
         if item.get("pinned"):
             buckets["pinned"] += 1
-        elif not isinstance(ts, (int, float)) or ts < cutoff:
+        elif ts is None or ts < cutoff:
             buckets["stale"] += 1                     # 时间不明也当下不了: 宁漏不错
         elif weibo_key(item) in seen:
             buckets["done"] += 1
@@ -253,8 +280,7 @@ def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=N
     # 跨度只按"现行窗口"算: 去掉置顶那条 2024-09-19 和历史回填(超窗)的,
     # 否则一条两年前的置顶把跨度撑到 19000h, 「无缺漏」的上限就成了假数。
     fresh = [i for i in weibo_items
-             if not i.get("pinned") and isinstance(i.get("created_at"), (int, float))
-             and i["created_at"] >= cutoff]
+             if not i.get("pinned") and (epoch_of(i.get("created_at")) or 0) >= cutoff]
     return {
         "queue": queue,
         "pairs": table,

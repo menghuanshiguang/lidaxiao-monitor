@@ -206,5 +206,34 @@ chk("第二行原始条数拆视频/非视频", "weibo=12(9视频/3非视频)" i
 chk("窗口跨度只算现行窗口 (去置顶、去超窗回填)",
     plan["span"]["count"] == 3 and 17 < plan["span"]["hours"] < 18, plan["span"])
 
+print("== 时间形状: int 与 ISO 字符串都必须认 (错形状不许静默) ==")
+ISO_A = "2026-11-25T19:02:27+08:00"
+ISO_B = "2026-11-26T12:18:44+08:00"
+chk("ISO 与 int 同一时刻等价",
+    G.epoch_of(ISO_A) == T0 and G.epoch_of(T0) == float(T0), G.epoch_of(ISO_A))
+chk("ISO 与 int 求差为 0", G._hours(T0, ISO_A) == 0.0)
+chk("认不出给 None (不炸)", G.epoch_of("昨天") is None and G.epoch_of(None) is None)
+chk("裸时间按北京时间", G.epoch_of("2026-11-25 19:02:27") == float(T0),
+    G.epoch_of("2026-11-25 19:02:27"))
+
+# 真实导出的形状: B 站 pubdate 是 int, 微博 created_at 是 ISO 字符串。
+# 只认数字会让整张表静默判"未匹配"(再被超窗规则变成全 stale 排除) —— 那是漏采。
+ISO_BI = [bili("BV1uEtH6mEY6", "提醒11月3日对美股的风险", T0 - 20278000),
+          bili("BV1eWy2zEE5U", "美股反弹的原因", T0)]
+ISO_W = [{"source": "weibo", "id": "5369478827477034", "title": "美股反弹的原因",
+          "created_at": ISO_A},                                   # 与 B 站同一分钟
+         {"source": "weibo", "id": "5369483480797474", "title": "美股反弹的原因",
+          "created_at": ISO_B}]                                   # 17h 后, 不该并
+iso_hit = G.match_item(ISO_W[0], ISO_BI)
+chk("ISO 形状喂进去也能匹配上(不能静默 0 匹配)",
+    iso_hit and iso_hit["similarity"] == 1.0, iso_hit)
+iso_plan = G.build_queue(ISO_BI, ISO_W, now=T0 + 61800 + 3600)
+chk("ISO 形状不被全判 stale",
+    iso_plan["counts"]["queue"] == 1 and iso_plan["counts"]["stale"] == 0,
+    iso_plan["counts"])
+chk("ISO 形状下 D=1", iso_plan["counts"]["matched"] == 1, iso_plan["counts"])
+chk("ISO 形状也能换成 pubdate 数字",
+    isinstance(G.as_video_item(ISO_W[0])["pubdate"], int), G.as_video_item(ISO_W[0]))
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

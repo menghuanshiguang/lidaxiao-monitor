@@ -161,5 +161,24 @@ finally:
     M.mark_processed = _orig_mark
     P.timeline_snapshot = _orig_snap2
 
+print("== 进判定的是不是真的只有视频 ==")
+_saved_snap = P.timeline_snapshot
+try:
+    MIXED = [dict(i) for i in ITEMS] + [
+        {"source": "weibo", "id": "9000000000000001", "title": "开播", "created_at": T0},
+        {"source": "weibo", "id": "9000000000000002", "title": "开播", "created_at": T0},
+    ]
+    P.timeline_snapshot = lambda cfg: dict(SNAP_OK, items=MIXED, videos=len(MIXED),
+                                           cards=len(MIXED))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _s, plan3 = P.weibo_round(CFG, BILI_PAGE, set())
+    chk("没有直链的条目不计入 M", plan3["counts"]["weibo_videos"] == 4,
+        plan3["counts"])
+    chk("也不进队列", plan3["counts"]["queue"] == 2, plan3["counts"])
+    chk("被剔除的有日志", "没有视频直链" in buf.getvalue(), buf.getvalue())
+finally:
+    P.timeline_snapshot = _saved_snap
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

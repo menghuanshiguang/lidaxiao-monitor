@@ -138,7 +138,7 @@ def upsert_report(video, section_md, summary_line, list_line):
             section_md = re.sub(r"^## 视频\d+:", f"## 视频{m.group(1)}:",
                                 section_md, count=1)
         text = "\n".join(lines[:s] + [section_md] + lines[e:])
-        log(f"报告章节已更新(BV {bvid}): {rp}")
+        log(f"报告章节已更新(键 {bvid}): {rp}")      # 键可能是 BV 也可能是 wb<id>
     else:
         num = len(re.findall(r"^## 视频\d+:", text, re.M)) + 1
         section_md = re.sub(r"^## 视频\d+:", f"## 视频{num}:", section_md, count=1)

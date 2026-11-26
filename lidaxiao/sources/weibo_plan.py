@@ -49,7 +49,13 @@ def weibo_round(cfg, bili_items, seen=(), fetch=None):
     """
     wcfg = (cfg or {}).get("weibo") or {}
     snap = fetch_snapshot(cfg, fetch)
-    plan = build_queue(bili_items, snap.get("items") or [], seen=seen,
+    # 契约: 进判定的必须是"微博视频"(有直链的)。timeline_snapshot 目前只吐视频,
+    # 但把这层依赖写成断言 —— 哪天 items 语义变了, M 与 Q 会一起错, 而日志上看不出来。
+    raw = snap.get("items") or []
+    items = [i for i in raw if i.get("video_url")]
+    if len(items) != len(raw):
+        log(f"⚠️ 微博条目里有 {len(raw) - len(items)} 条没有视频直链, 不进判定")
+    plan = build_queue(bili_items, items, seen=seen,
                        threshold=wcfg.get("sim_threshold"),
                        window_hours=wcfg.get("window_hours"),
                        max_age_days=wcfg.get("max_age_days", 7))
