@@ -18,6 +18,7 @@
     比重复更难发现。阈值可经 config weibo.sim_threshold 覆盖。
 """
 import datetime
+import math
 import re
 import time
 import unicodedata
@@ -76,6 +77,14 @@ def _seconds(value):
     return value
 
 
+def _finite(value):
+    """inf / nan 一律当成"认不出"。它们能穿过 float() 与大小比较, 却会让下游
+    int(...) 抛 OverflowError/ValueError —— 那是在监控链路正中间炸, 不是数据问题。"""
+    if value is None:
+        return None
+    return value if math.isfinite(value) else None
+
+
 def epoch_of(value):
     """时间 -> epoch 秒。认 int/float、纯数字字符串、ISO 8601 字符串; 认不出返回 None。
 
@@ -88,16 +97,16 @@ def epoch_of(value):
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
-        return _seconds(float(value))
+        return _finite(_seconds(float(value)))
     if isinstance(value, str) and value.strip():
         text = value.strip().replace("Z", "+00:00")
         try:
             dt = datetime.datetime.fromisoformat(text)
         except ValueError:
             try:
-                return _seconds(float(text))        # '1795604547' / '1795604547.5'
-            except ValueError:
-                return None
+                return _finite(_seconds(float(text)))   # '1795604547' / '1795604547.5'
+            except (TypeError, ValueError):
+                return None                       # 含 'inf' / 'nan' / '1e999' 这类
         if dt.tzinfo is None:                       # 裸时间按北京时间算 (本项目唯一时区)
             dt = dt.replace(tzinfo=CN_TZ)
         return float(dt.timestamp())
@@ -242,13 +251,18 @@ def as_video_item(item):
     """
     item = dict(item or {})
     dur = item.get("duration")
-    dur = float(dur) if isinstance(dur, (int, float)) and dur > 0 else 0.0
+    dur = float(dur) if isinstance(dur, (int, float)) else 0.0
+    if not math.isfinite(dur) or dur <= 0:
+        dur = 0.0                              # inf/nan 会让 int(dur // 60) 直接抛
+    pub = epoch_of(item.get("created_at"))
+    if pub is None:                            # 时间认不出就按"现在": 宁可报进今天,
+        pub = time.time()                      # 也不让整轮 run 在这里炸掉
     return {
         "source": "weibo",
         "id": str(item.get("id") or ""),
         "bvid": weibo_key(item),
         "title": str(item.get("title") or "").strip() or "（微博视频无标题）",
-        "pubdate": int(epoch_of(item.get("created_at")) or time.time()),
+        "pubdate": int(pub),
         "duration": dur,
         "dur_str": f"{int(dur // 60):02d}:{int(dur % 60):02d}" if dur else "",
         "video_url": item.get("video_url") or "",

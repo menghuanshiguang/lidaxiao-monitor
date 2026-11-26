@@ -240,7 +240,7 @@ chk("数字字符串认成时间", G.epoch_of("1795604547") == float(T0), G.epoc
 chk("数字字符串求差不炸", G._hours(T0, "1795604547") == 0.0)
 chk("毫秒时间戳归一到秒", G.epoch_of(1795604547000) == float(T0))
 chk("微秒时间戳归一到秒", G.epoch_of(1795604547000000) == float(T0))
-chk("毫秒不会因为超窗被误判 stale",
+chk("毫秒必须与 B 站配上, 否则会被当成独有重下",
     G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
                   now=T0 + 61800 + 3600)["counts"]["queue"] == 0
     and G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
@@ -248,6 +248,23 @@ chk("毫秒不会因为超窗被误判 stale",
     G.build_queue(ISO_BI, [dict(ISO_W[0], created_at=1795604547000)],
                   now=T0 + 61800 + 3600)["counts"])
 chk("布尔不当时间 (True 不是 1 秒)", G.epoch_of(True) is None)
+
+# inf / nan / 1e999: 能穿过 float() 与大小比较, 却会让下游 int() 抛 —— 那是在
+# 监控链路正中间炸 (as_video_item 在 main 里先于视频队列执行), 所以必须在这里判掉。
+for _bad in ("inf", "-inf", "nan", "1e999", float("inf"), float("nan")):
+    chk(f"{_bad!r} 认不出 (不当时间)", G.epoch_of(_bad) is None, G.epoch_of(_bad))
+junk = G.as_video_item({"id": "1", "title": "x", "created_at": float("nan"),
+                        "duration": float("inf")})
+chk("非有限值不会让 as_video_item 抛", isinstance(junk["pubdate"], int), junk)
+chk("非有限时长归 0 (不印 00:00 假长度)",
+    junk["duration"] == 0.0 and junk["dur_str"] == "", junk)
+chk("认不出时间时 pubdate 落在当前时刻附近",
+    abs(junk["pubdate"] - int(__import__("time").time())) < 5, junk["pubdate"])
+plan_bad = G.build_queue(ISO_BI, [{"source": "weibo", "id": "9", "title": "x",
+                                   "created_at": float("nan")}], now=T0)
+chk("坏时间的条目按 stale 排除, 不进队列",
+    plan_bad["counts"]["queue"] == 0 and plan_bad["counts"]["stale"] == 1,
+    plan_bad["counts"])
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
