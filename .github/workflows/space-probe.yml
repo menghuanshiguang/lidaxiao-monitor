@@ -1,0 +1,66 @@
+name: space-probe (temporary)
+
+# 一次性探针: 用 runner 上已有的 B 站 cookie 拉 UP 主空间作品全量列表。
+# 只读, 不改 monitor.yml 的行为; 拿到结果后本文件即删。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  space:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install -q requests
+
+      - name: Clone bilidown CLI
+        run: git clone --depth 1 https://github.com/menghuanshiguang/bilibili-downloader-cli.git _repo
+
+      - name: Write Bilibili cookies (from secret)
+        env:
+          COOKIES_B64: ${{ secrets.BILIBILI_COOKIES_B64 }}
+        run: |
+          if [ -z "$COOKIES_B64" ]; then echo "::error::缺少 BILIBILI_COOKIES_B64"; exit 1; fi
+          mkdir -p data ~/.cache
+          echo "$COOKIES_B64" | base64 -d > data/cookies.txt
+          cp data/cookies.txt ~/.cache/bilibili-login-cookies.txt
+          echo "cookies 写入完成 ($(wc -c < data/cookies.txt) bytes)"
+
+      - name: Raw space output (evidence)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python _repo/bin/bilidown.py space 2137589551 500 > /tmp/space_raw.txt 2>/tmp/space_err.txt || true
+          echo "=== stderr ==="; tail -20 /tmp/space_err.txt
+          echo "=== raw line count ==="; wc -l < /tmp/space_raw.txt
+          echo "=== raw head 20 ==="; head -20 /tmp/space_raw.txt
+          echo "=== raw tail 20 ==="; tail -20 /tmp/space_raw.txt
+
+      - name: Parsed list (bvid + pubdate + title)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python - <<'PY'
+          import json, sys
+          sys.path.insert(0, '.')
+          from lidaxiao.config import load_config
+          from lidaxiao.sources.bilibili import get_space_videos
+          cfg = load_config('config.json')
+          vids = get_space_videos(cfg, 500)
+          print('COUNT', len(vids))
+          for v in vids:
+              print('ROW', json.dumps({'bvid': v.get('bvid'), 'pubdate': v.get('pubdate'),
+                                       'title': v.get('title', '')}, ensure_ascii=False))
+          if vids:
+              ds = [v.get('pubdate') or 0 for v in vids]
+              print('PUBDATE_MIN', min(ds), 'PUBDATE_MAX', max(ds))
+          PY
