@@ -558,6 +558,69 @@ chk("已有日报二次追加: 新块在收尾声明之前",
     _ordered(_ex_txt2, "1273504300584140999", R.DISCLAIMER, second_last=True),
     [l for l in _ex_txt2.splitlines() if l.strip()][-3:])
 
+# 合并口径(2026-11-26 线上事故): 报告已有 13 条, 本轮新增 1 条 -> 14 条,
+# 旧的 13 条必须逐字节还在, 且整节按时间倒序。写节是「合并」不是「覆盖」。
+def _mk_dyn(i, ts):
+    return {"id_str": f"12700000000000000{i:02d}", "pub_ts": ts,
+            "major_type": "MAJOR_TYPE_ARCHIVE", "text": f"第 {i} 条原文",
+            "title": ""}
+
+
+_merge_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_merge_dir, f"{date_str}.md")
+_mday = "2026-12-02"
+_base_ts = 1763000000
+_old_ents = [{"dynamic": _mk_dyn(i, _base_ts + i * 86400), "analysis": f"第 {i} 条简版"}
+             for i in range(1, 14)]
+R.append_dynamics(_mday, _old_ents)
+_old_blocks = [R.dynamic_md(e["dynamic"], e["analysis"]) for e in _old_ents]
+_new_ent = {"dynamic": _mk_dyn(99, _base_ts + 20 * 86400), "analysis": "新的一条简版"}
+_added_merge = R.append_dynamics(_mday, [_new_ent])
+_mtxt = R.read_text(R.report_path(_mday))
+chk("13 旧 + 1 新: 追加返回 1", _added_merge == 1, _added_merge)
+chk("13 旧 + 1 新: 最终 14 条", _mtxt.count("<!-- dynamic:") == 14,
+    _mtxt.count("<!-- dynamic:"))
+chk("13 旧 + 1 新: 旧的 13 条逐字节不变",
+    all(b in _mtxt for b in _old_blocks),
+    [b[:24] for b in _old_blocks if b not in _mtxt])
+chk("13 旧 + 1 新: 新那条写进去了", str(_new_ent["dynamic"]["id_str"]) in _mtxt)
+_mtimes = re.findall(r"^### (\d{4}-\d{2}-\d{2} \d{2}:\d{2})", _mtxt, re.M)
+chk("13 旧 + 1 新: 整节按时间倒序", _mtimes == sorted(_mtimes, reverse=True), _mtimes)
+
+# 根因回归: force 重跑「最后一支视频」走 upsert_report 的替换分支时,
+# 动态节曾被一起删掉(parse_report 把最后一个节的 end 算成 EOF)。
+_rerun_dir = tempfile.mkdtemp()
+R.report_path = lambda date_str: os.path.join(_rerun_dir, f"{date_str}.md")
+_rday = "2026-12-03"
+_ts_a = int(_dt.datetime(2026, 12, 3, 9, 0,
+                         tzinfo=_dt.timezone(_dt.timedelta(hours=8))).timestamp())
+_ts_b = int(_dt.datetime(2026, 12, 3, 15, 0,
+                         tzinfo=_dt.timezone(_dt.timedelta(hours=8))).timestamp())
+_sec_a = ("## 视频1:《第一支》 (BV1rr000001)\n\n【一句话摘要】一\n\n"
+          + R.DISCLAIMER + "\n")
+_sec_b_old = ("## 视频1:《第二支》 (BV1rr000002)\n\n【一句话摘要】旧措辞\n\n"
+              + R.DISCLAIMER + "\n")
+R.upsert_report({"bvid": "BV1rr000001", "title": "第一支", "pubdate": _ts_a}, _sec_a,
+                "- 视频《第一支》: 摘要一", "- [09:00] 第一支 (BV1rr000001)")
+R.upsert_report({"bvid": "BV1rr000002", "title": "第二支", "pubdate": _ts_b}, _sec_b_old,
+                "- 视频《第二支》: 摘要二", "- [15:00] 第二支 (BV1rr000002)")
+R.append_dynamics(_rday, entries)
+chk("重跑前: 动态已写入", R.read_text(R.report_path(_rday)).count("<!-- dynamic:") == 2)
+R.upsert_report({"bvid": "BV1rr000002", "title": "第二支", "pubdate": _ts_b},
+                "## 视频1:《第二支》 (BV1rr000002)\n\n【一句话摘要】新措辞\n\n"
+                + R.DISCLAIMER + "\n",
+                "- 视频《第二支》: 摘要二", "- [15:00] 第二支 (BV1rr000002)")
+_rtxt = R.read_text(R.report_path(_rday))
+chk("重跑最后一支后: 动态节仍在", "## 李大霄动态" in _rtxt,
+    [l for l in _rtxt.splitlines() if l.startswith("## ")])
+chk("重跑最后一支后: 动态条数不变(2 条)", _rtxt.count("<!-- dynamic:") == 2,
+    _rtxt.count("<!-- dynamic:"))
+chk("重跑最后一支后: 视频换成了新正文", "新措辞" in _rtxt and "旧措辞" not in _rtxt)
+chk("重跑最后一支后: 动态节在视频之后、末行是声明",
+    _ordered(_rtxt, "## 视频2:《第二支》", "## 李大霄动态")
+    and [l for l in _rtxt.splitlines() if l.strip()][-1] == R.DISCLAIMER,
+    [l for l in _rtxt.splitlines() if l.startswith("## ")])
+
 # 「分析失败、末行是 ⚠️ AI分析失败」的日报(真实 2026-11-03.md 就是这种形态):
 # 追加后末行会变成声明 —— 有意的版面收敛, 不是 bug(见陷阱表)。
 _fail_day = "2026-12-01"

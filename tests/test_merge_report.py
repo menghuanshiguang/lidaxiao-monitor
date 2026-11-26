@@ -31,8 +31,8 @@ def chk(name, cond, info=""):
         print(f"  ❌ {name}\n     {info}")
 
 
-def dyn_block(i):
-    item = {"id_str": f"12423494582696000{i:02d}", "pub_ts": 1788095424,
+def dyn_block(i, ts=None):
+    item = {"id_str": f"12423494582696000{i:02d}", "pub_ts": ts or 1788095424,
             "major_type": "MAJOR_TYPE_OPUS", "text": f"第 {i} 条原文"}
     return R.dynamic_md(item, f"第 {i} 条简版")
 
@@ -102,12 +102,18 @@ chk("两个视频节都在", merged.count("## 视频") == 3, merged.count("## �
 chk("动态节排在视频章节之后",
     merged.index("## 李大霄动态") > merged.rindex("## 视频2:"), "节序不对")
 
-print("== 合并: 新报告自己带动态节(2 条) ==")
+print("== 合并: 新旧报告都带动态节(新报告只有本轮新增的 2 条) ==")
 NEW_DYN = NEW.rstrip() + "\n\n## 李大霄动态\n\n" + "\n\n".join(
     dyn_block(i) for i in (1, 2)) + "\n\n" + R.DISCLAIMER + "\n"
 m2 = _merge_report(NEW_DYN, OLD)
 chk("不重复出两份动态节", m2.count("## 李大霄动态") == 1, m2.count("## 李大霄动态"))
-chk("新报告的动态节优先", m2.count("<!-- dynamic:") == 2, m2.count("<!-- dynamic:"))
+# 2026-11-26 线上: 新报告只带本轮新抓的 1 条, 合并时「新覆盖旧」把旧的 13 条整段删了。
+chk("动态节按 id 取并集(13 条一条不少)", m2.count("<!-- dynamic:") == N,
+    m2.count("<!-- dynamic:"))
+chk("已有块逐字节原样", all(dyn_block(i) in m2 for i in range(1, N + 1)), "有块被改写")
+chk("动态节只有一条收尾声明",
+    m2.split("## 李大霄动态")[1].count(R.DISCLAIMER) == 1,
+    m2.split("## 李大霄动态")[1].count(R.DISCLAIMER))
 
 print("== 合并: 旧报告没有动态节(不能凭空造) ==")
 m3 = _merge_report(NEW, NEW)

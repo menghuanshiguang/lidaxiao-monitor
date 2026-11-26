@@ -371,7 +371,19 @@ def _merge_report(new_text, old_text):
 
     new_other = other_blocks(new_blocks)
     old_other = other_blocks(old_blocks)
-    others = [new_other[k] for k in new_other]
+    # 动态节的同标题块不许「新覆盖旧」: 新报告只带本轮新抓的几条, 覆盖就把已发布
+    # 的整段删了(2026-11-26 线上 13 条只剩 1 条, state 已记录, 当天补不回来)。
+    # 按 `<!-- dynamic:id -->` 合并, 旧块字节不动 + 时间倒序。
+    from lidaxiao.report.render import DYNAMIC_SECTION, merge_dynamic_sections
+    others = []
+    for k in new_other:
+        b = new_other[k]
+        if k == DYNAMIC_SECTION and k in old_other:
+            merged = merge_dynamic_sections("\n".join(b[1:]),
+                                            "\n".join(old_other[k][1:]))
+            others.append(merged.splitlines())
+        else:
+            others.append(b)
     for k, b in old_other.items():
         if k not in new_other:
             others.append(b)
