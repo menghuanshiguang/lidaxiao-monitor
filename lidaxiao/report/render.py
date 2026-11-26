@@ -29,6 +29,11 @@ def report_date_of(path):
 VIDEO_HEAD_RE = re.compile(r"^##\s*视频\d*\s*[:：]")
 BODY_HEAD_RE = re.compile(r"^##\s*(?:视频|【)")
 
+#: 章节标题括号里的 id: B 站 `BV...`, 微博 `wb<id>`。
+#: 微博条目必须与 B 站分辨得出, 所以键前缀写死在 sources/merge.weibo_key。
+CHAPTER_ID = r"(?:BV|wb)\w+"
+SECTION_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(" + CHAPTER_ID + r")\)?\s*$")
+
 
 def parse_report(text):
     """解析报告 -> {summary_lines, list_lines, sections:{bvid:(start,end)}}"""
@@ -44,7 +49,7 @@ def parse_report(text):
         if ln.startswith("## 视频清单"):
             in_summary, in_list = False, True
             continue
-        m = re.match(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$", ln)
+        m = SECTION_RE.match(ln)
         if m:
             if cur_bvid and sec_start is not None:
                 res["sections"][cur_bvid] = (sec_start, i)
@@ -144,9 +149,24 @@ def upsert_report(video, section_md, summary_line, list_line):
     write_text(rp, text)
     return rp
 
+def source_marker(video):
+    """微博条目的来源行。B 站条目返回空串 (现有报告一字不变)。
+
+    督查硬约束: 微博视频必须带 source=weibo + 微博 id, 报告里要与 B 站视频分辨。
+    章节头括号里已经是 `wb<id>`, 这行是给"按来源过滤/核对"用的显式标记。
+    """
+    if (video or {}).get("source") != "weibo":
+        return ""
+    url = video.get("weibo_url") or ""
+    return f"> source=weibo ｜ 微博 id={video.get('id')}" + (f" ｜ {url}" if url else "")
+
+
 def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, warn=None):
     """生成单个视频的报告章节 markdown"""
     head = f"## 视频1:《{video['title']}》 ({video['bvid']})"
+    marker = source_marker(video)
+    if marker:
+        head += "\n\n" + marker
     if warn:
         head += f"\n\n> ⚠️ {warn}"
     emd = ending_md(ending).strip()
@@ -279,7 +299,10 @@ def ending_md(rec):
 
 def list_line(video):
     t = datetime.datetime.fromtimestamp(video.get("pubdate", time.time()), CN_TZ)
-    return f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
+    line = f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
+    if (video or {}).get("source") == "weibo":
+        line += " ｜ source=weibo"
+    return line
 
 
 # ------------------------------------------------------------------ 动态一节

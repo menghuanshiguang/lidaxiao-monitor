@@ -159,6 +159,13 @@ def load_config(path=None):
         },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
+        "weibo": {                      # 微博视频号: B 站没有的视频从这里补 (只补不替)
+            "enabled": True,
+            "uid": "1645823934",        # 李大霄微博
+            "sim_threshold": 0.9,       # 跨源"同一条内容"的相似度阈值, 见 sources/merge.py
+            "window_hours": 6,          # 同一条内容的时间窗: 超过就算同名也不并
+            "max_age_days": 7,          # 早于该天数的微博条目不下 (防置顶/历史回填)
+        },
     }
     p = path or os.path.join(WORKDIR, "config.json")
     if os.path.exists(p):
@@ -167,7 +174,7 @@ def load_config(path=None):
         # 先深合并嵌套段再整体更新: cfg.update(user) 会把嵌套 dict 整体替换掉,
         # 导致后面的 cfg[k].update(user[k]) 变成 no-op, 用户配置缺省字段的默认值全部丢失
         for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama", "llm_local",
-                  "vision_free", "vision", "vision_cli", "vision_fallback"):
+                  "vision_free", "vision", "vision_cli", "vision_fallback", "weibo"):
             if isinstance(user.get(k), dict):
                 cfg[k].update(user.pop(k))
         cfg.update(user)

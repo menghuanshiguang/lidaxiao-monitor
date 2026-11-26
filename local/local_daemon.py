@@ -265,7 +265,10 @@ def _push_url():
     return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
 
 
-_SEC_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$", re.M)
+#: 章节/清单括号里的 id: B 站 `BV...`, 微博 `wb<id>` (与 lidaxiao.report.render.CHAPTER_ID 一致)。
+#: 不认 wb 的话, 微博章节会被当成"非视频顶层节"搬到文末, 重跑还会因编号变化叠出第二份。
+ITEM_ID = r"(?:BV|wb)\w+"
+_SEC_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(" + ITEM_ID + r")\)?\s*$", re.M)
 
 
 def _digest_maps(text):
@@ -287,7 +290,7 @@ def _digest_maps(text):
             if m:
                 sums[m.group(1).strip()] = ln
         elif in_list and ln.startswith("- "):
-            m = re.search(r"\((BV\w+)\)", ln)
+            m = re.search(r"\((" + ITEM_ID + r")\)", ln)
             if m:
                 lists[m.group(1)] = ln
     return sums, lists
@@ -337,7 +340,7 @@ def _merge_report(new_text, old_text):
     - 摘要 / 清单按合并后的章节顺序重建
     """
     # 真实日报的标题是 `## 视频1:《…》 (BV…)`(冒号后无空格), 这里两种写法都容忍
-    sec_re = re.compile(r"^##\s*视频\d+\s*[:：]\s*《(.+?)》\s*\(?(BV\w+)\)?\s*$")
+    sec_re = re.compile(r"^##\s*视频\d+\s*[:：]\s*《(.+?)》\s*\(?(" + ITEM_ID + r")\)?\s*$")
     _h, old_blocks = _split_top(old_text.splitlines())
     _h2, new_blocks = _split_top(new_text.splitlines())
 

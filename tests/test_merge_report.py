@@ -132,5 +132,26 @@ chk("章节重新编号不重复",
     len([l for l in m4.splitlines() if l.startswith("## 视频")]) == 4,
     [l for l in m4.splitlines() if l.startswith("## 视频")])
 
+print("== 合并: 微博章节按 wb<id> 合并, 不许被搬到文末或叠出第二份 ==")
+_WB_HEAD = ("## 视频1:《书中内容解读》 (wb5369222189809983)\n\n"
+            "> source=weibo ｜ 微博 id=5369222189809983\n\n【一句话摘要】读书\n\n"
+            + R.DISCLAIMER + "\n")
+WB_NEW = ("# 📺 李大霄视频日报 2026-11-25\n\n## 今日摘要\n- 视频《书中内容解读》: 读书\n\n"
+          "## 视频清单\n- [19:02] 书中内容解读 (wb5369222189809983) 02:31 ｜ source=weibo\n\n"
+          + _WB_HEAD)
+WB_OLD = ("# 📺 李大霄视频日报 2026-11-25\n\n## 今日摘要\n- 视频《书中内容解读》: 读书(旧)\n\n"
+          "## 视频清单\n- [19:02] 书中内容解读 (wb5369222189809983) 02:31 ｜ source=weibo\n\n"
+          "## 视频1:《书中内容解读》 (wb5369222189809983)\n\n"
+          "> source=weibo ｜ 微博 id=5369222189809983\n\n【一句话摘要】读书(旧措辞)\n\n"
+          + R.DISCLAIMER + "\n")
+m5 = _merge_report(WB_NEW, WB_OLD)
+chk("微博章节只有一份", m5.count("(wb5369222189809983)") == 2,
+    m5.count("(wb5369222189809983)"))
+chk("内容用新报告那版", "读书(旧措辞)" not in m5, m5[-300:])
+chk("仍是视频章节, 没被当成独立小节搬到文末",
+    len([l for l in m5.splitlines() if l.startswith("## 视频")]) == 2,
+    [l for l in m5.splitlines() if l.startswith("## 视频")])
+chk("source=weibo 标记还在", "source=weibo" in m5, m5[:300])
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

@@ -18,13 +18,23 @@
     比重复更难发现。阈值可经 config weibo.sim_threshold 覆盖。
 """
 import re
+import time
 import unicodedata
+
+from lidaxiao.common import CN_TZ
 
 #: 同一条内容在两边发布的间隔实测是分钟级 (0.01h / 0.07h), 6 小时已很宽松。
 WINDOW_HOURS = 6.0
 
 #: 见模块 docstring 的校准过程。
 SIM_THRESHOLD = 0.9
+
+#: 早于该天数的微博条目一律不下 —— 置顶那条 2024-09-19 与历史回填都靠它挡。
+MAX_AGE_DAYS = 7
+
+#: 报告/state 里给微博条目的键前缀。B 站是 `(BV…)`, 微博是 `(wb<id>)`,
+#: 报告里一眼分辨, 也不会被"按 BV 找同一条"的逻辑误认。
+WEIBO_KEY_PREFIX = "wb"
 
 TAG_RE = re.compile(r"#[^#]{1,30}#")
 SPACE_RE = re.compile(r"[\s\u3000]+")
@@ -170,3 +180,135 @@ def window_span(items):
     return {"first": min(stamps), "last": max(stamps),
             "hours": round((max(stamps) - min(stamps)) / 3600.0, 2),
             "count": len(stamps)}
+
+
+# ------------------------------------------------------------------ 下载队列
+
+
+def weibo_key(item):
+    """微博条目的键: `wb` + mblog.id。没有 id 返回空串 (调用方据此跳过)。"""
+    wid = str((item or {}).get("id") or "")
+    return (WEIBO_KEY_PREFIX + wid) if wid else ""
+
+
+def as_video_item(item):
+    """微博条目 -> 与 B 站条目同形的"视频", 好让同一条处理链路直接吃。
+
+    bvid 位放 `wb<id>`: 报告章节头、清单行、字幕文件名、片尾缓存键都用它,
+    所以微博条目在磁盘上不会和任何 BV 撞名。
+    """
+    item = dict(item or {})
+    dur = item.get("duration")
+    dur = float(dur) if isinstance(dur, (int, float)) and dur > 0 else 0.0
+    return {
+        "source": "weibo",
+        "id": str(item.get("id") or ""),
+        "bvid": weibo_key(item),
+        "title": str(item.get("title") or "").strip() or "（微博视频无标题）",
+        "pubdate": item.get("created_at") or int(time.time()),
+        "duration": dur,
+        "dur_str": f"{int(dur // 60):02d}:{int(dur % 60):02d}" if dur else "",
+        "video_url": item.get("video_url") or "",
+        "weibo_url": item.get("weibo_url") or "",
+    }
+
+
+def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=None,
+                max_age_days=MAX_AGE_DAYS, now=None):
+    """两份列表 -> 本次下载队列 + 五数。口径 (督查 2026-11-26 定死):
+
+        视频=M        微博视频进入判定的条数
+        匹配跳过=D    被 B 站同一条覆盖; **同一条微博被多条 B 站命中只 +1**
+        排除=P        置顶 / created_at 早于 max_age_days / 已处理过 (三者都不下载)
+        进入队列=Q    Q = M - D - P
+        合并后=K      K = N + Q   (N = 本次待处理 B 站条数, 由编排层给)
+
+    判定顺序固定为 匹配 -> 置顶 -> 超窗 -> 已处理: 三个桶互斥, 同一条既被覆盖
+    又置顶时只记 D 一次, 不会把一个条目算进两个数。
+    """
+    bili_items = list(bili_items or [])
+    weibo_items = list(weibo_items or [])
+    seen = {str(x) for x in (seen or [])}
+    now = int(time.time() if now is None else now)
+    cutoff = now - int(max_age_days) * 86400
+    table = pair_table(bili_items, weibo_items, window_hours, threshold)
+
+    queue, buckets = [], {"matched": 0, "pinned": 0, "stale": 0, "done": 0}
+    for item, row in zip(weibo_items, table):
+        if row["bvid"]:
+            buckets["matched"] += 1
+            continue
+        ts = item.get("created_at")
+        if item.get("pinned"):
+            buckets["pinned"] += 1
+        elif not isinstance(ts, (int, float)) or ts < cutoff:
+            buckets["stale"] += 1                     # 时间不明也当下不了: 宁漏不错
+        elif weibo_key(item) in seen:
+            buckets["done"] += 1
+        else:
+            queue.append(item)
+
+    m, d = len(weibo_items), buckets["matched"]
+    p = buckets["pinned"] + buckets["stale"] + buckets["done"]
+    # 跨度只按"现行窗口"算: 去掉置顶那条 2024-09-19 和历史回填(超窗)的,
+    # 否则一条两年前的置顶把跨度撑到 19000h, 「无缺漏」的上限就成了假数。
+    fresh = [i for i in weibo_items
+             if not i.get("pinned") and isinstance(i.get("created_at"), (int, float))
+             and i["created_at"] >= cutoff]
+    return {
+        "queue": queue,
+        "pairs": table,
+        "span": window_span(fresh),
+        "counts": {"weibo_videos": m, "matched": d, "excluded": p,
+                   "pinned": buckets["pinned"], "stale": buckets["stale"],
+                   "done": buckets["done"], "queue": len(queue)},
+    }
+
+
+def format_weibo_counts(counts):
+    """第一行: 微博侧的四个数, 排除再拆成两项 (和仍等于 P, 第三行可核)。
+
+    已处理单独列出来, 是因为 cron 每 3 小时一轮而窗口约 17.6 小时 —— 同一条会在
+    连续几轮里反复出现, 不排除就会每轮重下重析。
+    """
+    return (f"微博: 视频={counts.get('weibo_videos', 0)} "
+            f"匹配跳过={counts.get('matched', 0)} "
+            f"置顶/超窗排除={counts.get('pinned', 0) + counts.get('stale', 0)} "
+            f"已处理排除={counts.get('done', 0)} "
+            f"进入队列={counts.get('queue', 0)}")
+
+
+def format_list_counts(bili_n, counts, cards=None, videos=None, ok=None, fail=None):
+    """第二行: 目录口径的五个数 + 成功/失败。核对就是 K = N + Q 与 S + F = K。"""
+    q = counts.get("queue", 0)
+    k = int(bili_n) + q
+    raw = ""
+    if cards is not None:
+        videos = 0 if videos is None else int(videos)
+        # 原始条数在前, 括号里拆成视频/非视频: 「开播」通知也是 card, 只打 12 会与
+        # 视频 9 条对不上账。非视频 = cards - videos, 不写死"开播"。
+        raw = f"weibo={cards}({videos}视频/{max(int(cards) - videos, 0)}非视频) "
+    line = (f"列表: bili={bili_n} {raw}合并后={k} "
+            f"因重复跳过={counts.get('matched', 0)} "
+            f"排除={counts.get('excluded', 0)} 队列={q}")
+    if ok is not None or fail is not None:
+        line += f" ｜ 下载/处理成功={ok or 0} 失败={fail or 0}"
+    return line
+
+
+def format_window(span):
+    """窗口首末与跨度 —— 「无缺漏」的上限是「两轮成功 run 的间隔 < 这个跨度」。"""
+    def iso(ts):
+        if not isinstance(ts, (int, float)):
+            return "?"
+        return datetime_of(ts).strftime("%Y-%m-%d %H:%M")
+
+    return (f"微博窗口(去置顶): 首 {iso(span.get('first'))} 末 {iso(span.get('last'))} "
+            f"跨度 {span.get('hours')}h 条数 {span.get('count')}")
+
+
+def datetime_of(ts):
+    """epoch -> 北京时间 datetime (只给日志用)。"""
+    import datetime
+
+    return datetime.datetime.fromtimestamp(ts, CN_TZ)

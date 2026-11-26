@@ -299,6 +299,36 @@ def fetch_timeline(cfg=None, uid=None, fetch=None, cookie=None):
     return result
 
 
+def timeline_snapshot(cfg=None, uid=None, fetch=None):
+    """取一页原始快照 (静默, 不打日志) -> dict:
+
+        {status, items, cards, videos, message, http, meta, has_cookie}
+
+    status: ok / disabled / risk / login / empty / error —— 与 classify_payload 同名。
+    cards 是响应里 card 的**总数**(含「开播」这类非视频卡), videos 是解析出的视频数,
+    编排层打 `weibo=12(视频9/非视频3)` 靠这两个数, 不靠猜。
+    """
+    cfg = cfg or {}
+    wcfg = cfg.get("weibo") or {}
+    if not wcfg.get("enabled", True):
+        return {"status": "disabled", "items": [], "cards": 0, "videos": 0,
+                "message": "config weibo.enabled=false", "http": None,
+                "meta": {}, "has_cookie": False}
+    has_cookie = bool(read_cookie())
+    result = fetch_timeline(cfg, uid=uid, fetch=fetch)
+    items = result.get("items") or []
+    meta = result.get("meta") or {}
+    cards = meta.get("cards")
+    return {"status": "ok" if is_usable(result) else result.get("status"),
+            "items": items if is_usable(result) else [],
+            "cards": cards if isinstance(cards, int) else 0,
+            "videos": len(items),
+            "message": result.get("message") or "",
+            "http": result.get("http"),
+            "meta": meta,
+            "has_cookie": has_cookie}
+
+
 def collect_weibo_videos(cfg=None, uid=None, fetch=None, seen=()):
     """取一页并把已见项过滤掉。**只读不写**: 不落盘、不推进 state。
 
@@ -306,22 +336,25 @@ def collect_weibo_videos(cfg=None, uid=None, fetch=None, seen=()):
     """
     cfg = cfg or {}
     try:
-        wcfg = cfg.get("weibo") or {}
-        if not wcfg.get("enabled", True):
-            log("微博: 已禁用 (config weibo.enabled=false), 跳过")
-            return []
-        has_cookie = bool(read_cookie())
-        result = fetch_timeline(cfg, uid=uid, fetch=fetch)
-        if not is_usable(result):
-            # 失败只留一行, 且点明身份是否注入 —— 432 与 -100 的处置不同。
-            log(f"⚠️ 微博本次没拿到 ({result.get('status')}: {result.get('message')}, "
-                f"身份={'已注入' if has_cookie else '无'}), 不写 state、不出章节")
-            return []
-        meta = result.get("meta") or {}
-        fresh = new_items(result["items"], seen)
-        log(f"微博: 身份={'已注入' if has_cookie else '无'} cards={meta.get('cards')} "
-            f"total={meta.get('total')} 视频={len(result['items'])} 新增={len(fresh)}")
-        return fresh
+        snap = timeline_snapshot(cfg, uid=uid, fetch=fetch)
+        return _fresh_from_snapshot(snap, seen)
     except Exception as exc:                       # 兜底: 绝不影响视频链路
         log(f"⚠️ 微博处理异常 (已忽略): {type(exc).__name__}: {exc}")
         return []
+
+
+def _fresh_from_snapshot(snap, seen=()):
+    """快照 -> 新增条目列表 + 一行日志。编排层与 collect_weibo_videos 共用。"""
+    if snap.get("status") == "disabled":
+        log("微博: 已禁用 (config weibo.enabled=false), 跳过")
+        return []
+    if snap.get("status") != "ok":
+        # 失败只留一行, 且点明身份是否注入 —— 432 与 -100 的处置不同。
+        log(f"⚠️ 微博本次没拿到 ({snap.get('status')}: {snap.get('message')}, "
+            f"身份={'已注入' if snap.get('has_cookie') else '无'}), 不写 state、不出章节")
+        return []
+    meta = snap.get("meta") or {}
+    fresh = new_items(snap.get("items") or [], seen)
+    log(f"微博: 身份={'已注入' if snap.get('has_cookie') else '无'} cards={meta.get('cards')} "
+        f"total={meta.get('total')} 视频={len(snap.get('items') or [])} 新增={len(fresh)}")
+    return fresh

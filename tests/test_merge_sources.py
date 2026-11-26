@@ -138,5 +138,73 @@ chk("命中行带 bvid/理由/相似度",
     and rows[0]["similarity"] == 1.0, rows[0])
 chk("未命中行写 unmatched", rows[1]["bvid"] is None and rows[1]["reason"] == "unmatched", rows[1])
 
+print("== 下载队列: M/D/P/Q 五数 (督查口径) ==")
+PINNED = {"source": "weibo", "id": "2635689", "title": "2635与2689",
+          "created_at": 1726750200, "pinned": True}          # 置顶, 2024-09-19
+QUEUE_W = [
+    weibo("5369216985206630", "客户利益为重还是公司利益为重", T0),
+    weibo("5369222189809983", "投资前客观评估自己", T0 + 1260),
+    weibo("5369478827477034", "美股反弹的原因", T0 + 61800 + 240),   # 命中 BV1eWy2zEE5U
+    PINNED,
+    weibo("5369239026270845", "黄金的判断", T0 - 30 * 86400),        # 30 天前, 超窗
+]
+plan = G.build_queue(BI, QUEUE_W, now=T0 + 61800 + 3600)
+c = plan["counts"]
+chk("M = 微博视频条数", c["weibo_videos"] == 5, c)
+chk("D = 被 B 站覆盖的 1 条", c["matched"] == 1, c)
+chk("P = 置顶 1 + 超窗 1", c["excluded"] == 2 and c["pinned"] == 1 and c["stale"] == 1, c)
+chk("Q = M - D - P", c["queue"] == 2, c)
+chk("置顶那条不进队列", all(i.get("id") != "2635689" for i in plan["queue"]))
+chk("超窗那条不进队列", all(i.get("id") != "5369239026270845" for i in plan["queue"]))
+chk("队列里只有 B 站没有的两条",
+    [i["id"] for i in plan["queue"]] == ["5369216985206630", "5369222189809983"],
+    plan["queue"])
+
+done_plan = G.build_queue(BI, QUEUE_W, seen={"wb5369216985206630"}, now=T0 + 61800 + 3600)
+chk("已处理过的微博不进队列", done_plan["counts"]["queue"] == 1, done_plan["counts"])
+chk("已处理记在 done 桶, 仍算进 P",
+    done_plan["counts"]["done"] == 1 and done_plan["counts"]["excluded"] == 3,
+    done_plan["counts"])
+
+print("== 等式: K = N + Q, Q = M - D - P ==")
+for label, pl, n in (("常规", plan, 3), ("有已处理", done_plan, 0)):
+    cn = pl["counts"]
+    q = cn["weibo_videos"] - cn["matched"] - cn["excluded"]
+    chk(f"{label}: Q = M - D - P", q == cn["queue"], cn)
+    line = G.format_list_counts(n, cn, 12, 9)
+    chk(f"{label}: 日志里 K = N + Q",
+        f"合并后={n + cn['queue']}" in line and f"队列={cn['queue']}" in line, line)
+
+print("== 同一条微博被多条 B 站命中, D 只 +1 ==")
+BI2 = [bili("BV1eWy2zEE5U", "美股反弹的原因", T0 + 61800),
+       bili("BV1uEtH6mEY6", "美股反弹的原因", T0 + 61800 - 1800)]
+dup = G.build_queue(BI2, [weibo("5369478827477034", "美股反弹的原因", T0 + 61800 + 240)],
+                    now=T0 + 61800 + 3600)
+chk("两条 B 站命中同一条微博, D 仍为 1", dup["counts"]["matched"] == 1, dup["counts"])
+chk("它不会进队列", dup["counts"]["queue"] == 0, dup["counts"])
+
+print("== 微博条目 -> 视频链路能吃的结构 ==")
+asv = G.as_video_item({"id": "5369222189809983", "title": "书中内容解读",
+                       "created_at": T0, "duration": 151.6,
+                       "video_url": "https://f.video.weibocdn.com/x.mp4",
+                       "weibo_url": "https://m.weibo.cn/status/5369222189809983"})
+chk("bvid 位是 wb<id>", asv["bvid"] == "wb5369222189809983", asv)
+chk("pubdate 取 created_at", asv["pubdate"] == T0, asv)
+chk("时长换成 mm:ss", asv["dur_str"] == "02:31", asv["dur_str"])
+chk("source 标 weibo", asv["source"] == "weibo", asv)
+chk("没标题不炸", G.as_video_item({"id": "1"})["title"] == "（微博视频无标题）")
+chk("没有 id 的键为空", G.weibo_key({}) == "", G.weibo_key({}))
+
+print("== 日志格式 ==")
+line1 = G.format_weibo_counts(c)
+chk("第一行四个数都在",
+    "视频=5" in line1 and "匹配跳过=1" in line1 and "置顶/超窗排除=2" in line1
+    and "进入队列=2" in line1, line1)
+line2 = G.format_list_counts(3, c, 12, 9, 2, 1)
+chk("第二行带成功/失败", "下载/处理成功=2 失败=1" in line2, line2)
+chk("第二行原始条数拆视频/非视频", "weibo=12(9视频/3非视频)" in line2, line2)
+chk("窗口跨度只算现行窗口 (去置顶、去超窗回填)",
+    plan["span"]["count"] == 3 and 17 < plan["span"]["hours"] < 18, plan["span"])
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
