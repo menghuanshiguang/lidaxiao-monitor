@@ -10,8 +10,11 @@
 - 三个状态: `ok` / `degraded`(LLM 挂了, 只放原话引用、不写归纳; 降级节正文本来就是空的,
   所以 citations/key_points **允许全空**, 空就是空) / `no_content`(当天没有任何内容,
   原样延续上一份 stance/action 并沿用上一份 `as_of`, 不许编)。
-- `levels` 的每个点位、`assets` 的每个标的, 必须能在某条引用的正文里找到; 找不到就丢掉
-  (宁缺毋滥)。这是「不许另起一套市场判断」唯一能机械判的形式。
+- `levels` 的每个点位、`assets` 的每个标的, 必须能在**被引用那一节的正文**里找到;
+  找不到就丢掉(宁缺毋滥)。这是「不许另起一套市场判断」唯一能机械判的形式。
+  (督查 2026-11-27 放宽过一次: 原来要求出现在 citation 的引文片段里, 结果 27 号那天
+  `assets`/`levels` 双双为空 —— 模型引的那句话恰好没带「上证」「A股」。改成核这一节的
+  正文: 仍然是"报告里没有的就不许写", 只是不再要求它恰好落在引用的那几十个字里。)
 - `docs/reports/` 只读: 本模块一个字节也不写它, 只写 `docs/signal/`。
 - 输出里不放任何挂钟时间: `as_of` 固定为「报告日期 + 收盘时点」, 同样的报告跑两次必须
   逐字节相同, 没有例外。
@@ -203,20 +206,22 @@ def _clean_payload(sections, payload, dropped):
             continue
         citations.append({"text": text, "video": key,
                           "time": _time_of(sections, key) or str(c.get("time") or "")})
-    # 点位与标的必须能落到某条引用的正文里, 落不到的丢掉: 这是「不许另起市场判断」的机械判据
-    blob = " ".join(norm_text(c["text"]) for c in citations)
+    # 点位与标的必须能在被引那一节的正文里找到, 找不到的丢掉: 「不许另起市场判断」的机械判据。
+    # 只认被引用的那几节, 不是整份报告任意处 —— 否则把别的视频里的话挪过来也算过。
+    cited = {c["video"] for c in citations}
+    blob = " ".join(norm_text(s["body"]) for s in sections if s["key"] in cited)
     kept_assets = []
     for a in assets:
         if norm_text(a) and norm_text(a) in blob:
             kept_assets.append(a)
         else:
-            dropped.append((a, "标的在引用正文里找不到"))
+            dropped.append((a, "标的不在被引用那一节的正文里"))
     levels = []
     for lv in _level_list(payload.get("levels")):
         if norm_text(lv["asset"]) in blob and norm_text(str(lv["level"])) in blob:
             levels.append(lv)
         else:
-            dropped.append((lv["asset"], f"点位 {lv['level']} 在引用正文里找不到"))
+            dropped.append((lv["asset"], f"点位 {lv['level']} 不在被引用那一节的正文里"))
     assets = kept_assets
     if not citations:
         # 白名单过关、但一条引用都落不到报告上: 没有依据就不许有结论(宁缺毋滥)。

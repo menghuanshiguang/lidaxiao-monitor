@@ -119,11 +119,10 @@ chk("time 以报告为准, 不信 LLM 给的 23:59",
     sig["citations"][0]["time"] == "09:35", sig["citations"][0])
 chk("字段与顺序固定为 schema",
     list(sig.keys()) == list(S.FIELDS), list(sig.keys()))
-chk("assets 只留在引用正文里出现的(A股被丢, 重复项去掉)",
-    sig["assets"] == ["恒生科技"], sig["assets"])
-chk("assets 的每个标的都能在某条引用里找到",
-    all(norm(a) in norm(sig["citations"][0]["text"]) + norm(sig["citations"][1]["text"])
-        for a in sig["assets"]), sig["assets"])
+chk("assets 按**被引那一节的正文**核, 重复项去掉",
+    sig["assets"] == ["A股", "恒生科技"], sig["assets"])
+chk("留下的标的都能在被引那一节的正文里找到",
+    "A股相对抗跌" in _body[BV], sig["assets"])
 chk("levels 补默认 kind 且点位能在引用里找到",
     sig["levels"] == [{"asset": "上证", "level": 3455, "kind": "支撑"}], sig["levels"])
 chk("每条引用在整份报告里 grep 得到",
@@ -133,6 +132,36 @@ chk("每条引用的 video 都是报告里真实存在的节",
 chk("ok 状态", sig["status"] == "ok" and sig["change"] == "无前值", sig["status"])
 chk("as_of 是 报告日期+收盘时点, 不带挂钟",
     sig["as_of"] == "2026-11-27 15:00", sig["as_of"])
+
+print("\n== 标的/点位只认被引那一节的正文, 不是整份报告任意处 ==")
+TWO = ("# 📺 李大霄视频日报 2026-11-28\n\n## 今日摘要\n"
+       "- 视频《甲》: 甲摘要\n- 视频《乙》: 乙摘要\n\n## 视频清单\n"
+       "- [09:00] 甲 (BVaaaaaaa01)\n- [10:00] 乙 (BVaaaaaaa02)\n\n"
+       "## 视频1:《甲》 (BVaaaaaaa01)\n\n【一句话摘要】\n"
+       "甲这一段说恒生科技在3500点附近见底\n\n"
+       "## 视频2:《乙》 (BVaaaaaaa02)\n\n【一句话摘要】\n"
+       "乙这一段说比特币和黄金9999要小心\n")
+_only_first = {"stance": "看多", "action": "持有", "strength": 1, "horizon": "短线",
+               "assets": ["恒生科技", "比特币"],
+               "levels": [{"asset": "恒生科技", "level": 3500},
+                          {"asset": "比特币", "level": 9999}],
+               "key_points": ["只引甲那节"],
+               "citations": [{"text": "甲这一段说恒生科技在3500点附近见底",
+                              "video": "BVaaaaaaa01"}]}
+_sig_two = S.build_signal("2026-11-28", TWO, payload=_only_first)
+chk("只会引了甲 -> 乙里的比特币被丢", _sig_two["assets"] == ["恒生科技"], _sig_two["assets"])
+chk("点位同理: 3500 在甲里留下, 9999 只在乙里被丢",
+    _sig_two["levels"] == [{"asset": "恒生科技", "level": 3500, "kind": "支撑"}],
+    _sig_two["levels"])
+chk("比特币仍在整份报告里(证明不是『报告里没有』而是『不在被引那节』)",
+    "比特币" in TWO and "比特币" not in json.dumps(_sig_two, ensure_ascii=False))
+_both = dict(_only_first)
+_both["citations"] = _only_first["citations"] + [
+    {"text": "乙这一段说比特币和黄金9999要小心", "video": "BVaaaaaaa02"}]
+_sig_two2 = S.build_signal("2026-11-28", TWO, payload=_both)
+chk("把乙那节也引上 -> 比特币就能留下", _sig_two2["assets"] == ["恒生科技", "比特币"],
+    _sig_two2["assets"])
+chk("两节都引时点位也进", len(_sig_two2["levels"]) == 2, _sig_two2["levels"])
 
 print("\n== 引用长度门槛: 少于 10 个字即使真在报告里也不算 ==")
 chk("『会师』在报告里, 但只有 2 字 -> 不合格",
