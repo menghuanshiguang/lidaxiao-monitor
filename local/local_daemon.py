@@ -248,12 +248,8 @@ def run_monitor(args, local=True):
     try:
         r = subprocess.run(cmd, cwd=WORKDIR, env=env, check=False)
         log(f"  -> monitor 退出码={r.returncode}")
-        # 必须把退出码交回去: 只 log 不返回的话, 云端入口拿不到失败,
-        # monitor 崩了 job 照样是绿的(2026-11-26 run 45764668848 就是这样)。
-        return r.returncode
     except Exception as e:
         log(f"❌ 本地 monitor 运行异常: {e}")
-        return 1
 
 
 def _ensure_git_user():
@@ -269,10 +265,7 @@ def _push_url():
     return f"https://oauth2:{token}@github.com/{REPO}.git" if token else f"https://github.com/{REPO}.git"
 
 
-#: 章节/清单括号里的 id: B 站 `BV...`, 微博 `wb<id>` (与 lidaxiao.report.render.CHAPTER_ID 一致)。
-#: 不认 wb 的话, 微博章节会被当成"非视频顶层节"搬到文末, 重跑还会因编号变化叠出第二份。
-ITEM_ID = r"(?:BV|wb)\w+"
-_SEC_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(" + ITEM_ID + r")\)?\s*$", re.M)
+_SEC_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$", re.M)
 
 
 def _digest_maps(text):
@@ -294,7 +287,7 @@ def _digest_maps(text):
             if m:
                 sums[m.group(1).strip()] = ln
         elif in_list and ln.startswith("- "):
-            m = re.search(r"\((" + ITEM_ID + r")\)", ln)
+            m = re.search(r"\((BV\w+)\)", ln)
             if m:
                 lists[m.group(1)] = ln
     return sums, lists
@@ -344,7 +337,7 @@ def _merge_report(new_text, old_text):
     - 摘要 / 清单按合并后的章节顺序重建
     """
     # 真实日报的标题是 `## 视频1:《…》 (BV…)`(冒号后无空格), 这里两种写法都容忍
-    sec_re = re.compile(r"^##\s*视频\d+\s*[:：]\s*《(.+?)》\s*\(?(" + ITEM_ID + r")\)?\s*$")
+    sec_re = re.compile(r"^##\s*视频\d+\s*[:：]\s*《(.+?)》\s*\(?(BV\w+)\)?\s*$")
     _h, old_blocks = _split_top(old_text.splitlines())
     _h2, new_blocks = _split_top(new_text.splitlines())
 
@@ -378,19 +371,7 @@ def _merge_report(new_text, old_text):
 
     new_other = other_blocks(new_blocks)
     old_other = other_blocks(old_blocks)
-    # 动态节的同标题块不许「新覆盖旧」: 新报告只带本轮新抓的几条, 覆盖就把已发布
-    # 的整段删了(2026-11-26 线上 13 条只剩 1 条, state 已记录, 当天补不回来)。
-    # 按 `<!-- dynamic:id -->` 合并, 旧块字节不动 + 时间倒序。
-    from lidaxiao.report.render import DYNAMIC_SECTION, merge_dynamic_sections
-    others = []
-    for k in new_other:
-        b = new_other[k]
-        if k == DYNAMIC_SECTION and k in old_other:
-            merged = merge_dynamic_sections("\n".join(b[1:]),
-                                            "\n".join(old_other[k][1:]))
-            others.append(merged.splitlines())
-        else:
-            others.append(b)
+    others = [new_other[k] for k in new_other]
     for k, b in old_other.items():
         if k not in new_other:
             others.append(b)

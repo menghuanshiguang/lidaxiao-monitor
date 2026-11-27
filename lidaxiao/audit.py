@@ -172,11 +172,6 @@ def make_summary_line(title, analysis):
     return f"- 视频《{title}》: {head}{pt}"
 
 
-#: 清单行/章节头括号里的 id: B 站 `BV...`, 微博 `wb<id>` ——
-#: 两者都要参与排序, 否则微博条目恒落 99:99 被排到当天最末。
-ITEM_ID = r"(?:BV|wb)\w+"
-
-
 def resort_report(text):
     """BUG-12 排序统一: 今日摘要 / 视频清单 / 正文章节 统一按发布时间升序。
 
@@ -195,7 +190,7 @@ def resort_report(text):
     times = {}          # bvid -> "HH:MM"
     title_time = {}     # 标题 -> "HH:MM"
     for ln in lines:
-        m = re.match(r"^-\s*\[(\d{2}:\d{2})\]\s*(.+?)\s*\((" + ITEM_ID + r")\)", ln)
+        m = re.match(r"^-\s*\[(\d{2}:\d{2})\]\s*(.+?)\s*\((BV\w+)\)", ln)
         if m:
             times[m.group(3)] = m.group(1)
             title_time[m.group(2).strip()] = m.group(1)
@@ -261,7 +256,7 @@ def resort_report(text):
             standalones.append(blk)
 
     def sec_key(block):
-        m = re.search(r"\((" + ITEM_ID + r")\)", block[0])
+        m = re.search(r"\((BV\w+)\)", block[0])
         return key_of(m.group(1)) if m else "99:99"
 
     def title_of(ln):
@@ -269,8 +264,8 @@ def resort_report(text):
         return m.group(1).strip() if m else ""
 
     sum_fill.sort(key=lambda l: key_of(title_of(l)))
-    list_fill.sort(key=lambda l: key_of(re.search(r"\((" + ITEM_ID + r")\)", l).group(1))
-                   if re.search(r"\((" + ITEM_ID + r")\)", l) else "99:99")
+    list_fill.sort(key=lambda l: key_of(re.search(r"\((BV\w+)\)", l).group(1))
+                   if re.search(r"\((BV\w+)\)", l) else "99:99")
     sections.sort(key=sec_key)
 
     # 3) 重排章节编号

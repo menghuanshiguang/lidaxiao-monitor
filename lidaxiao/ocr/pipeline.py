@@ -12,51 +12,6 @@ from lidaxiao.ocr.frames import (
 from lidaxiao.textutil import filter_ocr_text, log, norm_text, write_text
 
 
-def aoyuon_model_tag(model_dir=None):
-    """已加载模型的标签 `v0.4, 19.0M int8, 2890 字符`, 全部按**文件实际值**算。
-
-    2026-11-26 之前这里是字面量 "已加载 (19.7M int8)" —— 换任何版本都印同一串, 于是
-    "看日志有没有印 19.0M"这个判据永远不成立(督查按它判 v0.4 是否生效, 当场判错)。
-    日志是给人做判断用的, 不许写死。
-
-    取不到的项直接省掉 (返回空串时调用方只印 "已加载"), 绝不让日志这一步影响主流程。
-    """
-    if model_dir is None:
-        # 不走 `aoyuon.recognize.DEFAULT_MODEL_DIR`: 那个模块 import 期就要 numpy,
-        # 本机(无 numpy)连取常量都会 ImportError, 于是标签永远是空串。模型目录就是
-        # 仓库根的 aoyuon/model —— 与 Recognizer 的默认值同一处, 但不依赖它的 import。
-        model_dir = os.path.join(WORKDIR, "aoyuon", "model")
-    if not isinstance(model_dir, (str, bytes, os.PathLike)):
-        return ""                       # 它在引擎选择分支里, 抛了会误回退 RapidOCR
-    version = ""
-    try:
-        with open(os.path.join(model_dir, "VERSION"), encoding="utf-8") as fh:
-            version = fh.read().strip().strip('"').strip("'")
-    except OSError:
-        pass
-    size = 0
-    for name in ("model.onnx", "model_fp32.onnx"):
-        try:
-            size = os.path.getsize(os.path.join(model_dir, name))
-            break
-        except OSError:
-            continue
-    chars = 0
-    try:
-        with open(os.path.join(model_dir, "charset.txt"), encoding="utf-8") as fh:
-            chars = len(fh.read().splitlines())
-    except OSError:
-        pass
-    parts = []
-    if version:
-        parts.append(f"v{version}")
-    if size:
-        parts.append(f"{size / (1024 * 1024):.1f}M int8")
-    if chars:
-        parts.append(f"{chars} 字符")
-    return ", ".join(parts)
-
-
 def ocr_video(cfg, video_path, bvid):
     """返回 (字幕文本, 统计) ; 文本为空表示无字幕
 
@@ -83,14 +38,7 @@ def ocr_video(cfg, video_path, bvid):
                 log("⚠ Aoyuon-OCR 启动失败, 本次回退 RapidOCR")
                 xm = None
             else:
-                # 版本与体积按文件算, 不写死: 换模型时这一行必须自己变。
-                # 外面再包一层: 这行日志在"引擎是否可用"的分支里, 它抛异常会被下面的
-                # except 当成"Aoyuon 不可用"而回退 RapidOCR —— 日志不许有这种副作用。
-                try:
-                    _tag = aoyuon_model_tag()
-                except Exception:
-                    _tag = ""
-                log(f"Aoyuon-OCR 已加载 ({_tag})" if _tag else "Aoyuon-OCR 已加载")
+                log("Aoyuon-OCR 已加载 (19.7M int8)")
         except Exception as e:
             log(f"⚠ Aoyuon-OCR 不可用({e}), 回退 RapidOCR")
             xm = None

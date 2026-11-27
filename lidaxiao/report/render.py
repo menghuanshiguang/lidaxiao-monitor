@@ -25,16 +25,6 @@ def report_date_of(path):
     return name if REPORT_DATE_RE.match(name) else ""
 
 
-# 视频正文小节(`## 【核心观点】` 等)跟着上面那支视频走; `## 李大霄动态` 这类是独立小节。
-VIDEO_HEAD_RE = re.compile(r"^##\s*视频\d*\s*[:：]")
-BODY_HEAD_RE = re.compile(r"^##\s*(?:视频|【)")
-
-#: 章节标题括号里的 id: B 站 `BV...`, 微博 `wb<id>`。
-#: 微博条目必须与 B 站分辨得出, 所以键前缀写死在 sources/merge.weibo_key。
-CHAPTER_ID = r"(?:BV|wb)\w+"
-SECTION_RE = re.compile(r"^## 视频\d+:《(.+?)》\s*\(?(" + CHAPTER_ID + r")\)?\s*$")
-
-
 def parse_report(text):
     """解析报告 -> {summary_lines, list_lines, sections:{bvid:(start,end)}}"""
     res = {"summary_lines": [], "list_lines": [], "sections": {}}
@@ -49,21 +39,11 @@ def parse_report(text):
         if ln.startswith("## 视频清单"):
             in_summary, in_list = False, True
             continue
-        m = SECTION_RE.match(ln)
+        m = re.match(r"^## 视频\d+:《(.+?)》\s*\(?(BV\w+)\)?\s*$", ln)
         if m:
             if cur_bvid and sec_start is not None:
                 res["sections"][cur_bvid] = (sec_start, i)
             cur_bvid, sec_start = m.group(2), i
-            in_summary = in_list = False
-            continue
-        if ln.startswith("## ") and not BODY_HEAD_RE.match(ln):
-            # 独立小节(`## 李大霄动态`)到此结束上一支视频的章节范围。
-            # 不切这一刀, 最后一支视频的范围会一路吃到 EOF, 把排在文末的动态节
-            # 也算进去 —— 重跑替换该视频时就会把动态节整段删掉(2026-11-26 线上
-            # 丢了 12 条, state 已记录, 不会自己补回来)。
-            if cur_bvid and sec_start is not None:
-                res["sections"][cur_bvid] = (sec_start, i)
-            cur_bvid, sec_start = None, None
             in_summary = in_list = False
             continue
         if in_summary and ln.startswith("- "):
@@ -138,7 +118,7 @@ def upsert_report(video, section_md, summary_line, list_line):
             section_md = re.sub(r"^## 视频\d+:", f"## 视频{m.group(1)}:",
                                 section_md, count=1)
         text = "\n".join(lines[:s] + [section_md] + lines[e:])
-        log(f"报告章节已更新(键 {bvid}): {rp}")      # 键可能是 BV 也可能是 wb<id>
+        log(f"报告章节已更新(BV {bvid}): {rp}")
     else:
         num = len(re.findall(r"^## 视频\d+:", text, re.M)) + 1
         section_md = re.sub(r"^## 视频\d+:", f"## 视频{num}:", section_md, count=1)
@@ -149,24 +129,9 @@ def upsert_report(video, section_md, summary_line, list_line):
     write_text(rp, text)
     return rp
 
-def source_marker(video):
-    """微博条目的来源行。B 站条目返回空串 (现有报告一字不变)。
-
-    督查硬约束: 微博视频必须带 source=weibo + 微博 id, 报告里要与 B 站视频分辨。
-    章节头括号里已经是 `wb<id>`, 这行是给"按来源过滤/核对"用的显式标记。
-    """
-    if (video or {}).get("source") != "weibo":
-        return ""
-    url = video.get("weibo_url") or ""
-    return f"> source=weibo ｜ 微博 id={video.get('id')}" + (f" ｜ {url}" if url else "")
-
-
 def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, warn=None):
     """生成单个视频的报告章节 markdown"""
     head = f"## 视频1:《{video['title']}》 ({video['bvid']})"
-    marker = source_marker(video)
-    if marker:
-        head += "\n\n" + marker
     if warn:
         head += f"\n\n> ⚠️ {warn}"
     emd = ending_md(ending).strip()
@@ -195,7 +160,7 @@ def build_section(cfg, video, subtitle_text, analysis, err=None, ending=None, wa
         return (with_tail(head + "\n\n> ⚠️ AI分析失败, 仅保留字幕"), "")
     one_line = ""
     if "【一句话摘要】" not in analysis:
-        log(f"⚠️ 分析缺少【一句话摘要】标记(键 {video['bvid']}), 摘要走兜底")
+        log(f"⚠️ 分析缺少【一句话摘要】标记(BV {video['bvid']}), 摘要走兜底")
     m = re.search(r"【一句话摘要】\s*(.+)", analysis)
     if m:
         one_line = m.group(1).strip()
@@ -299,10 +264,7 @@ def ending_md(rec):
 
 def list_line(video):
     t = datetime.datetime.fromtimestamp(video.get("pubdate", time.time()), CN_TZ)
-    line = f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
-    if (video or {}).get("source") == "weibo":
-        line += " ｜ source=weibo"
-    return line
+    return f"- [{t.strftime('%H:%M')}] {video['title']} ({video['bvid']}) {video.get('dur_str', '')}"
 
 
 # ------------------------------------------------------------------ 动态一节
@@ -363,89 +325,6 @@ def _disclaimer_line(text):
     return text[:at].count("\n")
 
 
-DYNAMIC_HEAD_RE = re.compile(r"^###\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\b")
-
-
-def _split_dynamic_blocks(text):
-    """动态节正文 -> (前导行, 块文本列表)。按 `### ` 标题切块, 块内字节原样保留。"""
-    lead, blocks, cur = [], [], None
-    for ln in (text or "").splitlines():
-        if ln.startswith("### "):
-            if cur is not None:
-                blocks.append(cur)
-            cur = [ln]
-        elif cur is None:
-            lead.append(ln)
-        else:
-            cur.append(ln)
-    if cur is not None:
-        blocks.append(cur)
-    out = []
-    for b in blocks:
-        while b and not b[-1].strip():        # 只削块尾空行, 不动行内空白
-            b.pop()
-        joined = "\n".join(b)
-        if joined.strip():
-            out.append(joined)
-    while lead and not lead[0].strip():
-        lead.pop(0)
-    while lead and not lead[-1].strip():
-        lead.pop()
-    return lead, out
-
-
-def _dynamic_sort_key(block):
-    m = DYNAMIC_HEAD_RE.match(block or "")
-    return m.group(1) if m else ""
-
-
-def merge_dynamic_blocks(existing_text, new_blocks):
-    """把新块并进已有动态块: 按 `<!-- dynamic:id -->` 去重 + 按时间倒序。
-
-    已有块的字节一律不动(已发布的分析不重写), 只调整顺序;
-    同时间的块保持原有先后(稳定排序), 没有 `### 时间` 头的块排在最后。
-    """
-    lead, blocks = _split_dynamic_blocks(existing_text)
-    seen = set(DYNAMIC_MARKER_RE.findall(existing_text or ""))
-    for b in (new_blocks or []):
-        ids = DYNAMIC_MARKER_RE.findall(b or "")
-        if ids and ids[0] in seen:
-            continue
-        seen.update(ids)
-        blocks.append(b)
-    timed = [b for b in blocks if _dynamic_sort_key(b)]
-    untimed = [b for b in blocks if not _dynamic_sort_key(b)]
-    timed.sort(key=_dynamic_sort_key, reverse=True)
-    return lead, timed + untimed
-
-
-def merge_dynamic_sections(new_seg_text, old_seg_text):
-    """两份报告的动态节正文 -> 合并后的整节文本(含一条收尾声明)。
-
-    合并口径与 `_insert_dynamic_blocks` 一致: 按 `<!-- dynamic:id -->` 去重,
-    已有块的字节一律不动(已发布的分析不重写), 按时间倒序输出。
-    报告合并(`_merge_report`)必须走这里 —— 非视频顶层节按「新覆盖旧」处理时,
-    同标题的 `## 李大霄动态` 会被新报告的少数几条顶掉, 当天补不回来。
-    """
-    def body(text):
-        seg = (text or "").splitlines()
-        d = _disclaimer_line("\n".join(seg))
-        return ("\n".join(seg[:d] if d >= 0 else seg),
-                (seg[d].strip() if d >= 0 else ""))
-
-    new_body, new_close = body(new_seg_text)
-    old_body, old_close = body(old_seg_text)
-    lead, merged = merge_dynamic_blocks(new_body, _split_dynamic_blocks(old_body)[1])
-    out = DYNAMIC_SECTION + "\n\n"
-    if lead:
-        out += "\n".join(lead) + "\n\n"
-    out += "\n\n".join(merged) + "\n"
-    close = new_close or old_close or DISCLAIMER
-    if close:
-        out += "\n" + close + "\n"
-    return out
-
-
 def _insert_dynamic_blocks(text, blocks):
     """追加「## 李大霄动态」小节: 整体排在所有视频块之后, 节末自带一条收尾声明。
 
@@ -458,18 +337,14 @@ def _insert_dynamic_blocks(text, blocks):
     声明(已知代价: 2026-10-27 这类 6 条声明的日报变 7 条, 属正确)。
     动态节已存在时新块插在**它自己的收尾声明之前**, 不再补第二条声明, 所以
     二次追加不会让声明条数继续涨。
-
-    写节的方式是**合并**: 读出现有块 -> 按 `<!-- dynamic:id -->` 去重 -> 按时间
-    倒序 -> 原子写。绝不拿「本轮 fetch 的结果」整段覆盖现有节 —— 那会静默删掉
-    已发布、state 已记录的条目, 且不会自己补回来(2026-11-26 线上丢了 12 条)。
     """
+    block = "\n\n".join(blocks)
     lines = text.splitlines()
     idx = next((i for i, ln in enumerate(lines)
                 if ln.strip() == DYNAMIC_SECTION), None)
     if idx is None:
-        _, merged = merge_dynamic_blocks("", blocks)
-        return (text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n"
-                + "\n\n".join(merged) + "\n\n" + DISCLAIMER + "\n")
+        return (text.rstrip() + "\n\n" + DYNAMIC_SECTION + "\n\n" + block
+                + "\n\n" + DISCLAIMER + "\n")
     end = len(lines)
     for j in range(idx + 1, len(lines)):
         if lines[j].startswith("## "):
@@ -479,14 +354,17 @@ def _insert_dynamic_blocks(text, blocks):
     rest = lines[end:]
     d = _disclaimer_line("\n".join(seg))
     if d >= 0:
-        body_text, close = "\n".join(seg[:d]), seg[d].strip()
+        body, close = seg[:d], seg[d].strip()
     else:
-        body_text, close = "\n".join(seg), DISCLAIMER
-    lead, merged = merge_dynamic_blocks(body_text, blocks)
-    chunk = DYNAMIC_SECTION + "\n\n"
-    if lead:
-        chunk += "\n".join(lead) + "\n\n"
-    chunk += "\n\n".join(merged) + "\n"
+        body, close = seg, DISCLAIMER
+    while body and not body[0].strip():
+        body.pop(0)
+    while body and not body[-1].strip():
+        body.pop()
+    chunk = DYNAMIC_SECTION + "\n"
+    if body:
+        chunk += "\n" + "\n".join(body) + "\n"
+    chunk += "\n" + block + "\n"
     if close:
         chunk += "\n" + close + "\n"
     out = "\n".join(lines[:idx]).rstrip() + "\n\n" + chunk

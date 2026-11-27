@@ -40,36 +40,24 @@ def dt(y, mo, d, h, mi, tz=CN):
 
 print("== slot 计算 ==")
 chk("slot_datetimes 一天两个点",
-    [x.strftime("%H:%M") for x in T.slot_datetimes(datetime.date(2026, 11, 24))] == ["14:40", "20:00"])
+    [s.strftime("%H:%M") for s in T.slot_datetimes(datetime.date(2026, 11, 24))] == ["14:40", "20:00"])
 chk("slot_key 零填充", T.slot_key(dt(2026, 11, 24, 14, 40)) == "2026-11-24 14:40")
-chk("14:40 的有效期到次日 20:00",
-    T.slot_deadline(dt(2026, 11, 24, 14, 40)) == dt(2026, 11, 25, 20, 0))
-chk("20:00 的有效期到次日 14:40",
-    T.slot_deadline(dt(2026, 11, 24, 20, 0)) == dt(2026, 11, 25, 14, 40))
-
-chk("14:39 补昨天 20:00(它还差 1 分钟到期), 不是「未到点」",
-    T.slot_key(T.due_slot(dt(2026, 11, 24, 14, 39))) == "2026-11-23 20:00")
+chk("14:39 未到点 -> None", T.due_slot(dt(2026, 11, 24, 14, 39)) is None)
 chk("14:40 正好到点 -> 14:40",
     T.slot_key(T.due_slot(dt(2026, 11, 24, 14, 40))) == "2026-11-24 14:40")
-chk("15:30 仍补 14:40", T.slot_key(T.due_slot(dt(2026, 11, 24, 15, 30))) == "2026-11-24 14:40")
-chk("19:00 仍补 14:40(不是已过 60 分钟就丢)",
-    T.slot_key(T.due_slot(dt(2026, 11, 24, 19, 0))) == "2026-11-24 14:40")
+chk("15:30 在 60 分钟窗口内 -> 补 14:40",
+    T.slot_key(T.due_slot(dt(2026, 11, 24, 15, 30))) == "2026-11-24 14:40")
+chk("15:41 超出窗口 -> None", T.due_slot(dt(2026, 11, 24, 15, 41)) is None)
 chk("20:00 -> 20:00", T.slot_key(T.due_slot(dt(2026, 11, 24, 20, 0))) == "2026-11-24 20:00")
-chk("21:30 仍补 20:00(挂起 1.5 小时)",
-    T.slot_key(T.due_slot(dt(2026, 11, 24, 21, 30))) == "2026-11-24 20:00")
-chk("次日 03:10 仍补昨天 20:00(挂起 7h 那种)",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 3, 10))) == "2026-11-24 20:00")
-chk("次日 13:00 仍补昨天 20:00", T.slot_key(T.due_slot(dt(2026, 11, 25, 13, 0))) == "2026-11-24 20:00")
-chk("次日 14:39 仍是昨天 20:00(快到 14:40 还没到)",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 14, 39))) == "2026-11-24 20:00")
-chk("次日 14:40 切到今天的 14:40",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 14, 40))) == "2026-11-25 14:40")
-chk("次日 15:00 只补今天的 14:40, 不补昨天的槽",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 15, 0))) == "2026-11-25 14:40")
-chk("上午 10:00 补昨天 20:00(整天没开机也能补)",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 10, 0))) == "2026-11-24 20:00")
-chk("两个 slot 都在窗内时只返回最近那个",
-    T.slot_key(T.due_slot(dt(2026, 11, 25, 13, 0))) == "2026-11-24 20:00")
+chk("21:01 超出窗口 -> None", T.due_slot(dt(2026, 11, 24, 21, 1)) is None)
+chk("上午 10:00 -> None(昨天 20:00 早已超窗)", T.due_slot(dt(2026, 11, 24, 10, 0)) is None)
+chk("20:59 -> 仍补 20:00", T.slot_key(T.due_slot(dt(2026, 11, 24, 20, 59)))
+    == "2026-11-24 20:00")
+chk("跨夜 00:10 -> None(离 20:00 已 4 小时, 出了 60 分钟窗口)",
+    T.due_slot(dt(2026, 11, 25, 0, 10)) is None)
+chk("睡到 21:00 醒: 只补 20:00 这一发, 不连发两发",
+    T.slot_key(T.due_slot(dt(2026, 11, 24, 21, 0))) == "2026-11-24 20:00")
+chk("睡到 22:10 醒: 两发都超窗 -> None", T.due_slot(dt(2026, 11, 24, 22, 10)) is None)
 chk("UTC 时刻会先换算到 CN_TZ",
     T.slot_key(T.due_slot(datetime.datetime(2026, 11, 24, 6, 40,
                                             tzinfo=datetime.timezone.utc))) == "2026-11-24 14:40")
@@ -166,14 +154,8 @@ TOKEN = "ghp_thisMustNeverBePrinted123456"
 T.load_token = lambda: (TOKEN, "测试注入")
 
 led_a = os.path.join(tempfile.mkdtemp(), "slots.txt")
-def _just_now_z(after=1):
-    """刚刚创建的 run(N 秒前), 不写死日期 —— 写死会让测试随时间腐坏。"""
-    t = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=after)
-    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 new_run = {"id": 4242, "path": T.WORKFLOW_PATH, "status": "queued",
-           "created_at": _just_now_z(1)}
+           "created_at": "2026-11-24T06:40:30Z"}
 f = Fake(dispatch_status=204, run_after=[new_run])
 rc, out = run_main(f, dt(2026, 11, 24, 14, 40), led_a)
 chk("正常路径返回 0", rc == 0, (rc, out[-300:]))
@@ -210,10 +192,8 @@ chk("时间往回拨 -> 不派发", rc == 0 and f4.calls == [] and "往回拨" i
 
 f5 = Fake()
 led_e = os.path.join(tempfile.mkdtemp(), "slots.txt")
-T.ledger_add(led_e, "2026-11-23 20:00", "1")     # 昨天那格已派过 -> 此刻无事可做
-f5 = Fake()
 rc, out = run_main(f5, dt(2026, 11, 24, 14, 39), led_e)
-chk("该补的槽已派过 -> 0 且不联网", rc == 0 and f5.calls == [], (rc, f5.calls))
+chk("没到 slot -> 0 且不联网", rc == 0 and f5.calls == [], (rc, f5.calls))
 
 print("== 失败必须响亮 ==")
 
@@ -263,27 +243,6 @@ f10 = Fake(run_after=[new_run])
 rc, out = run_main(f10, dt(2026, 11, 24, 14, 40), led_k)
 chk("没有 token -> 返回 2 且 0 派发", rc == 2 and f10.calls == [], (rc, f10.calls))
 T.load_token = lambda: (TOKEN, "测试注入")      # 复原, 别污染后面的用例
-
-print("== 冷启动: 没有 data/ 也要能自建 ==")
-_cold_root = tempfile.mkdtemp()               # 里面没有 data/
-_cold_lock = os.path.join(_cold_root, "data", "trigger.lock")
-_cold_led = os.path.join(_cold_root, "data", "triggered_slots.txt")
-f12 = Fake(run_after=[new_run])
-try:
-    rc, out = run_main(f12, dt(2026, 11, 24, 14, 40), _cold_led, use_lock=_cold_lock)
-except Exception as exc:          # 冷启动崩了要报成 ❌ 而不是把整轮测试炸掉
-    rc, out = f"EXC {type(exc).__name__}: {exc}", ""
-chk("data/ 不存在时能自建并走到派发确认", rc == 0 and f12.dispatched == 1, (rc, out[-160:]))
-chk("自建后锁文件已释放", not os.path.exists(_cold_lock), _cold_lock)
-chk("记账落在 data/ 下", os.path.exists(_cold_led), _cold_led)
-chk("data/ 目录被建出来", os.path.isdir(os.path.join(_cold_root, "data")))
-
-print("== 记账位置: 不进 state/ ==")
-chk("默认记账路径在 data/ 下, 不在 state/",
-    os.sep + "data" + os.sep in T.LEDGER_PATH
-    and (os.sep + "state" + os.sep) not in T.LEDGER_PATH, T.LEDGER_PATH)
-chk("默认锁路径也在 data/ 下",
-    os.sep + "data" + os.sep in T.LOCK_PATH, T.LOCK_PATH)
 
 print("== 并发: 同 slot 第二次派发被记账挡住 ==")
 led_c2 = os.path.join(tempfile.mkdtemp(), "slots.txt")

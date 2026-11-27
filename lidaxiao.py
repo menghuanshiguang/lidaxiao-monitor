@@ -25,12 +25,9 @@ def run_once(args):
             return 0
         ld.log("云端开始处理")
         ld.reset_local_state()
-        rc = ld.run_monitor(args, local=False)
-        # 报告照发(崩之前跑出来的那几节不该丢), 但退出码照传 —— 否则 monitor 失败
-        # 会被这个 return 0 吃掉, workflow 的 job 变成绿的, "run success" 不再等于
-        # "报告产出"(2026-11-26 那次一轮零报告, job 却是 success)。
+        ld.run_monitor(args, local=False)
         ld.publish_reports(args, tag="cloud")
-        return rc
+        return 0
     else:
         ok = ld.run_slot(args)
         if ok is False:

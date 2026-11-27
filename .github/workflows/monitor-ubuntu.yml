@@ -97,8 +97,6 @@ jobs:
           OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DSV_TOKEN: ${{ secrets.DSV_TOKEN }}
-          # 微博访客身份 (只读时间线用). 没有该 secret 时取数降级, 不影响视频链路
-          WEIBO_SUB: ${{ secrets.WEIBO_SUB }}
           GH_TOKEN: ${{ github.token }}
           PYTHONIOENCODING: utf-8
           LIDAXIAO_OCR_ENGINE: ${{ github.event.inputs.ocr_engine }}

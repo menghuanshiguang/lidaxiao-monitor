@@ -19,8 +19,7 @@ LLM_PROVIDER_KEY_ENVS = {
 
 LLM_KEY_ENVS = ("OPENCODE_GO_API_KEY", "DEEPSEEK_API_KEY", "DSV_TOKEN")
 
-FREE_PROVIDER = "opencode-zen-free"        # 旧: 直连 Zen 免密车道(指纹头)
-FREE_GATEWAY_PROVIDER = "free-gateway"     # 新: 本机 dsh-opencode-free 网关(OpenAI 兼容, 无鉴权)
+FREE_PROVIDER = "opencode-zen-free"
 
 
 def _env_or_envfile(name):
@@ -46,8 +45,6 @@ def load_llm_key(provider=None):
     """密钥优先级: 环境变量 > .env 文件; provider=None 时按 OPENCODE_GO_API_KEY > DEEPSEEK_API_KEY 顺序"""
     if provider == FREE_PROVIDER:
         return "public"        # 免密车道固定 token, 走 OpenCode 指纹头校验
-    if provider == FREE_GATEWAY_PROVIDER:
-        return "local"         # 本机网关无鉴权, 这个值不会被发出去
     names = LLM_PROVIDER_KEY_ENVS.get(provider, LLM_KEY_ENVS) if provider else LLM_KEY_ENVS
     for name in names:
         v = _env_or_envfile(name)
@@ -68,13 +65,13 @@ def load_config(path=None):
         "frame_interval": 0.0,          # 0=自适应 (时长/240, 限1~4秒)
         "ocr_confidence": 0.5,
         "min_subtitle_chars": 30,       # 字幕文本少于该长度视为"无字幕"
-        "llm_free": {                           # 免费车道: 本机 dsh-opencode-free 网关 (OpenAI 兼容, 无鉴权)
+        "llm_free": {                           # 免费层: OpenCode Zen 免密车道 (无需任何 key)
             "enabled": True,
-            "provider": FREE_GATEWAY_PROVIDER,
-            "base_url": "http://127.0.0.1:18787/v1",
-            "model": "",                        # 空 = 运行时 GET /v1/models 取第一个 -free (不写死)
+            "provider": "opencode-zen-free",    # 走 Zen 公共免密网关, 固定 Bearer public + OpenCode 指纹头
+            "base_url": "https://opencode.ai/zen/v1",
+            "model": "mimo-v2.6-flash-free",
             "temperature": 0.3,
-            "max_tokens": 32768,                # 与旧直连车道一致: 思考关不掉, 正文要留足
+            "max_tokens": 32768,                # 该车道 reasoning_effort 是空操作, "max"=把 max_tokens 顶满
             "timeout": 300,
         },
         "llm": {
@@ -159,13 +156,6 @@ def load_config(path=None):
         },
         "dl_retries": 1,                # 下载失败额外重试次数
         "llm_retries": 3,
-        "weibo": {                      # 微博视频号: B 站没有的视频从这里补 (只补不替)
-            "enabled": True,
-            "uid": "1645823934",        # 李大霄微博
-            "sim_threshold": 0.9,       # 跨源"同一条内容"的相似度阈值, 见 sources/merge.py
-            "window_hours": 6,          # 同一条内容的时间窗: 超过就算同名也不并
-            "max_age_days": 7,          # 早于该天数的微博条目不下 (防置顶/历史回填)
-        },
     }
     p = path or os.path.join(WORKDIR, "config.json")
     if os.path.exists(p):
@@ -174,7 +164,7 @@ def load_config(path=None):
         # 先深合并嵌套段再整体更新: cfg.update(user) 会把嵌套 dict 整体替换掉,
         # 导致后面的 cfg[k].update(user[k]) 变成 no-op, 用户配置缺省字段的默认值全部丢失
         for k in ("llm_free", "llm", "llm_fallback", "llm_cli", "llm_ollama", "llm_local",
-                  "vision_free", "vision", "vision_cli", "vision_fallback", "weibo"):
+                  "vision_free", "vision", "vision_cli", "vision_fallback"):
             if isinstance(user.get(k), dict):
                 cfg[k].update(user.pop(k))
         cfg.update(user)
