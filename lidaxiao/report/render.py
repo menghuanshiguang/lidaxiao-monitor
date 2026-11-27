@@ -74,6 +74,61 @@ def parse_report(text):
         res["sections"][cur_bvid] = (sec_start, len(lines))
     return res
 
+def drop_section(text, key):
+    """把某一节(连同它的清单行、摘要行)整段删掉, 其余节重排编号。
+
+    用于跨源替换: B 站补发了同一内容时, 往轮留下的 `(wb…)` 节要整条消失 ——
+    只删章节不删清单/摘要, 报告里还会剩一条指向已删章节的引用(2026-11-27 那种
+    「同一内容两条」正是这么来的)。
+
+    没删到就原样返回, 调用方据此不写盘: 白写一次会改 mtime 与字节, 事后没法区分
+    "真改过" 和 "空跑"。
+    """
+    if not text:
+        return text, {"removed": False}
+    parsed = parse_report(text)
+    sec = parsed["sections"].get(key)
+    if sec is None:
+        return text, {"removed": False}
+    lines = text.splitlines()
+    s, e = sec
+    head = lines[s]
+    m = re.match(r"^##\s*视频\d*[:：]\s*《(.+?)》", head)
+    title = m.group(1).strip() if m else ""
+    idx = 1 + len([l for l in lines[:s] if re.match(r"^##\s*视频\d+[:：]", l)])
+    rest = lines[:s] + lines[e:]
+    rest = [ln for ln in rest if f"({key})" not in ln]
+    if title:
+        # 摘要行按标题删**一条**(不是全部): 同一标题的两条摘要恰恰是这次要消掉的重复,
+        # 全删会把留下那节的摘要一起抹掉(2026-11-27 那份就是两条一模一样的)。
+        for i, ln in enumerate(rest):
+            if ln.startswith("- 视频《") and title in ln:
+                del rest[i]
+                break
+    out = "\n".join(rest).rstrip() + "\n"
+    if _audit:
+        out = _audit.resort_report(out)
+    return out, {
+        "removed": True, "head": head, "title": title, "idx": idx,
+        "sections_before": len(parsed["sections"]),
+        "sections_after": len(parse_report(out)["sections"]),
+        "bytes_before": len(text.encode("utf-8")),
+        "bytes_after": len(out.encode("utf-8")),
+    }
+
+
+def remove_section(date_str, key):
+    """按报告日期删节并写盘; 返回 info, removed=False 表示没有这一节(不写盘)。"""
+    rp = report_path(date_str) if date_str else ""
+    if not rp or not os.path.exists(rp):
+        return {"removed": False, "path": rp, "reason": "报告不存在"}
+    out, info = drop_section(read_text(rp), key)
+    info["path"] = rp
+    if info.get("removed"):
+        write_text(rp, out)
+    return info
+
+
 def upsert_report(video, section_md, summary_line, list_line):
     """追加/更新当日报告; 返回报告路径"""
     date_str = datetime.datetime.fromtimestamp(

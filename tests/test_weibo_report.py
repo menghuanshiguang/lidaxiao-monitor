@@ -103,5 +103,57 @@ try:
 finally:
     R.report_path = _orig
 
+print("== 跨源替换: 删掉往轮那条微博节 (2026-11-27 真实报告) ==")
+# 这份 fixture 就是线上出事那天的原样: 同一内容并列两条, 前者是微博的降级空节
+_dup = os.path.join(ROOT, "tests", "fixtures", "report", "dup_2026-11-27.md")
+_real_text = open(_dup, encoding="utf-8").read()
+chk("fixture 里确实有两条(否则下面全是空转)",
+    _real_text.count("## 视频1:《") == 1 and _real_text.count("## 视频2:《") == 1
+    and "wb5369798433178131" in _real_text and "BV1hv1pz2EbP" in _real_text,
+    _real_text.count("## 视频"))
+
+_new, _info = R.drop_section(_real_text, "wb5369798433178131")
+chk("删掉的是第 1 节", _info["idx"] == 1 and "wb5369798433178131" in _info["head"], _info)
+chk("节数 2 -> 1", (_info["sections_before"], _info["sections_after"]) == (2, 1), _info)
+chk("微博键一处不剩", "wb5369798433178131" not in _new, _new[:300])
+chk("source=weibo 也不剩", "source=weibo" not in _new)
+chk("留的是 B 站那节", "BV1hv1pz2EbP" in _new and "## 视频1:《六大举措" in _new, _new[:400])
+chk("节序号连续(视频1, 无视频2)", _new.count("## 视频1:") == 1
+    and "## 视频2:" not in _new, _new.count("## 视频1:"))
+chk("摘要行只删一条(不是把留下的那条也抹掉)",
+    sum(1 for l in _new.splitlines() if l.startswith("- 视频《")) == 1,
+    [l for l in _new.splitlines() if l.startswith("- 视频《")])
+chk("清单行只剩 B 站那行",
+    sum(1 for l in _new.splitlines() if l.startswith("- [")) == 1,
+    [l for l in _new.splitlines() if l.startswith("- [")])
+chk("整文件变小但不为空", _info["bytes_after"] < _info["bytes_before"] > 1000,
+    (_info["bytes_before"], _info["bytes_after"]))
+chk("没有该节时原样返回且不标记删除",
+    R.drop_section(_new, "wb5369798433178131")[1]["removed"] is False)
+
+print("== 跨源替换: 只有 B 站这次真出了章节才删 ==")
+from lidaxiao.report import crossreplace as CR  # noqa: E402
+_pairs = [{"bvid": "BV1hv1pz2EbP", "weibo_key": "wb5369798433178131",
+           "weibo_id": "5369798433178131",
+           "weibo_title": "六大举措在发力 稳市曙光或已出现", "weibo_date": "2026-11-27"}]
+_tmp2 = tempfile.mkdtemp()
+_orig2 = R.report_path
+R.report_path = lambda d: os.path.join(_tmp2, f"{d}.md")
+try:
+    open(R.report_path("2026-11-27"), "w", encoding="utf-8").write(_real_text)
+    _n, _skip = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "error"})   # 下载就失败
+    chk("B 站没出章节时一节都不删", _n == 0 and _skip, (_n, _skip))
+    chk("报告原地没动(字节不变)",
+        os.path.getsize(R.report_path("2026-11-27")) == len(_real_text.encode("utf-8")))
+    _n2, _skip2 = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "ok"})
+    chk("B 站出了章节才删", _n2 == 1 and not _skip2, (_n2, _skip2))
+    _after = open(R.report_path("2026-11-27"), encoding="utf-8").read()
+    chk("落盘后微博节真的没了", "wb5369798433178131" not in _after)
+    chk("落盘后 B 站节还在", "BV1hv1pz2EbP" in _after)
+    _n3, _skip3 = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "ok"})
+    chk("重复调用不会误删别的东西(已无该节)", _n3 == 0 and _skip3, (_n3, _skip3))
+finally:
+    R.report_path = _orig2
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

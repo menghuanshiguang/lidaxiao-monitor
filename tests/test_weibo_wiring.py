@@ -180,5 +180,22 @@ try:
 finally:
     P.timeline_snapshot = _saved_snap
 
+print("== 编排层: 往轮发过的微博 + 这次才出现的 B 站 -> replaced 交给报告层 ==")
+_saved2 = P.timeline_snapshot
+try:
+    DUP_W = [wb("5369798433178131", "六大举措在发力 稳市曙光或已出现", T0)]
+    DUP_B = [{"bvid": "BV1hv1pz2EbP", "title": "六大举措在发力 稳市曙光或已出现",
+              "pubdate": T0 + 120}]
+    P.timeline_snapshot = lambda cfg: dict(SNAP_OK, items=DUP_W, videos=1, cards=1)
+    _s, plan_dup = P.weibo_round(CFG, DUP_B, set())
+    chk("没发过: 不进 replaced", plan_dup["replaced"] == [], plan_dup["replaced"])
+    _s2, plan_dup2 = P.weibo_round(CFG, DUP_B, {"wb5369798433178131"})
+    chk("发过: replaced 一条, 指向 BV", len(plan_dup2["replaced"]) == 1
+        and plan_dup2["replaced"][0]["bvid"] == "BV1hv1pz2EbP", plan_dup2["replaced"])
+    chk("replaced 的日期是微博发布日", plan_dup2["replaced"][0]["weibo_date"] == "2026-11-25",
+        plan_dup2["replaced"])
+finally:
+    P.timeline_snapshot = _saved2
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

@@ -266,5 +266,34 @@ chk("坏时间的条目按 stale 排除, 不进队列",
     plan_bad["counts"]["queue"] == 0 and plan_bad["counts"]["stale"] == 1,
     plan_bad["counts"])
 
+print("== 跨源替换: 微博那条往轮已发过, 而 B 站这次才出现 ==")
+# 线上实况 2026-11-27: 微博 09:32 先发并处理, B 站 09:35 发同一条, 下一轮才被看到
+REP_W = [weibo("5369798433178131", "六大举措在发力 稳市曙光或已出现",
+               T0 + 3 * 60)]
+REP_B = [bili("BV1hv1pz2EbP", "六大举措在发力 稳市曙光或已出现", T0 + 3 * 60 + 120)]
+_plain = G.build_queue(REP_B, REP_W, seen=set(), now=T0 + 3600)
+chk("没发过时不进 replaced", _plain["replaced"] == [] and _plain["counts"]["cross_replace"] == 0,
+    _plain["counts"])
+chk("没发过时 D=1, Q=0 (照旧由 B 站独占)",
+    _plain["counts"]["matched"] == 1 and _plain["counts"]["queue"] == 0, _plain["counts"])
+
+_seen = G.build_queue(REP_B, REP_W, seen={"wb5369798433178131"}, now=T0 + 3600)
+chk("发过之后进 replaced", len(_seen["replaced"]) == 1, _seen["replaced"])
+chk("replaced 带 bvid/微博键/日期", _seen["replaced"][0]["bvid"] == "BV1hv1pz2EbP"
+    and _seen["replaced"][0]["weibo_key"] == "wb5369798433178131"
+    and _seen["replaced"][0]["weibo_date"] == G.date_of(T0 + 180),
+    _seen["replaced"])
+chk("replaced 计入 cross_replace", _seen["counts"]["cross_replace"] == 1, _seen["counts"])
+chk("B 站那条照样在队列(处理由编排层做)",
+    [i["bvid"] for i in REP_B] == ["BV1hv1pz2EbP"])
+chk("微博侧仍算 D, 不进 Q", _seen["counts"]["matched"] == 1
+    and _seen["counts"]["queue"] == 0, _seen["counts"])
+chk("等式不受影响: Q = M-D-P",
+    _seen["counts"]["queue"] == (_seen["counts"]["weibo_videos"] - _seen["counts"]["matched"]
+                               - _seen["counts"]["excluded"]), _seen["counts"])
+chk("date_of 认 int 与 ISO",
+    G.date_of(T0) == G.date_of("2026-11-25T19:02:27+08:00") == "2026-11-25",
+    (G.date_of(T0), G.date_of("2026-11-25T19:02:27+08:00")))
+
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)

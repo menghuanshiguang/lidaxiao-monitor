@@ -701,13 +701,19 @@ chk("resort 幂等", A.resort_report(A.resort_report(VIDEO_ONLY_A)) == A.resort_
 # 所属视频块; 一旦块边界放宽(把任意 "## " 当边界), 标题会与视频脱钩、挤到所有视频之后。
 _rep_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "docs", "reports")
-_real = sorted(glob.glob(os.path.join(_rep_dir, "*.md")))
+_all_real = sorted(glob.glob(os.path.join(_rep_dir, "*.md")))
+# 混源报告(含 `(wb…)` 章节)不在这条比对的范围内: 旧实现只认 `(BV…)`, 微博节在它眼里
+# 恒落 99:99, 而现在的语义是按微博自己那条的发布时间参与排序 —— 两者**本就应该不同**,
+# 拿旧实现逐字节比等于要求新功能不许生效。混源排序由 test_weibo_report 单独钉。
+_real = [p for p in _all_real
+         if "(wb" not in open(p, encoding="utf-8").read()]
 _bad = []
 for _p in _real:
     _t = open(_p, encoding="utf-8").read()
     if A.resort_report(_t) != _legacy_resort(_t):
         _bad.append(os.path.basename(_p))
-chk(f"真实日报 {len(_real)} 份与旧实现逐字节相同", _real and not _bad, _bad[:5])
+chk(f"真实日报 {len(_real)}/{len(_all_real)} 份(纯 B 站)与旧实现逐字节相同",
+    len(_real) > 50 and not _bad, (_bad[:5], len(_real)))
 chk("真实日报含视频正文小节(否则上一条是空转)",
     any("## 【一句话摘要】" in open(_p, encoding="utf-8").read() for _p in _real))
 

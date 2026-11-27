@@ -113,6 +113,14 @@ def epoch_of(value):
     return None
 
 
+def date_of(ts):
+    """epoch -> 北京时间日期 'YYYY-MM-DD'; 认不出返回空串。"""
+    value = epoch_of(ts)
+    if value is None:
+        return ""
+    return datetime.datetime.fromtimestamp(value, CN_TZ).strftime("%Y-%m-%d")
+
+
 def _hours(ts_a, ts_b):
     a, b = epoch_of(ts_a), epoch_of(ts_b)
     if a is None or b is None:
@@ -279,6 +287,8 @@ def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=N
         排除=P        置顶 / created_at 早于 max_age_days / 已处理过 (三者都不下载)
         进入队列=Q    Q = M - D - P
         合并后=K      K = N + Q   (N = 本次待处理 B 站条数, 由编排层给)
+        跨源替换=B    D 里"微博那条往轮已发过"的条数 —— 这些 B 站条照常处理,
+                      但要把报告里旧的 `(wb…)` 节删掉, 同一内容只留 B 站那节
 
     判定顺序固定为 匹配 -> 置顶 -> 超窗 -> 已处理: 三个桶互斥, 同一条既被覆盖
     又置顶时只记 D 一次, 不会把一个条目算进两个数。
@@ -290,10 +300,19 @@ def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=N
     cutoff = now - int(max_age_days) * 86400
     table = pair_table(bili_items, weibo_items, window_hours, threshold)
 
-    queue, buckets = [], {"matched": 0, "pinned": 0, "stale": 0, "done": 0}
+    queue, replaced = [], []
+    buckets = {"matched": 0, "pinned": 0, "stale": 0, "done": 0}
     for item, row in zip(weibo_items, table):
         if row["bvid"]:
             buckets["matched"] += 1
+            # 微博那条**往轮已经发过**(id 在 seen 里), B 站这次才出现同一条 ——
+            # 报告里已经有一节了。交给编排层把那一节删掉、由 B 站重出一节,
+            # 否则同一内容在报告里并列两条(2026-11-27 实况)。
+            if weibo_key(item) in seen:
+                replaced.append({"bvid": row["bvid"], "weibo_key": weibo_key(item),
+                                 "weibo_id": str(item.get("id") or ""),
+                                 "weibo_title": item.get("title") or "",
+                                 "weibo_date": date_of(item.get("created_at"))})
             continue
         ts = epoch_of(item.get("created_at"))
         if item.get("pinned"):
@@ -314,10 +333,12 @@ def build_queue(bili_items, weibo_items, seen=(), threshold=None, window_hours=N
     return {
         "queue": queue,
         "pairs": table,
+        "replaced": replaced,
         "span": window_span(fresh),
         "counts": {"weibo_videos": m, "matched": d, "excluded": p,
                    "pinned": buckets["pinned"], "stale": buckets["stale"],
-                   "done": buckets["done"], "queue": len(queue)},
+                   "done": buckets["done"], "queue": len(queue),
+                   "cross_replace": len(replaced)},
     }
 
 

@@ -39,40 +39,22 @@ try:
 except Exception:  # pragma: no cover - 模块缺失时不影响主流程
     _audit = None
 
-
-
-
-
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
     pass
 
-
 # monitor 自己只用 log/read_text/write_text; filter_ocr_text 与 norm_text 的唯一
 # 外部消费者 local/batch_subtitles.py 已改为从 lidaxiao.textutil 直接 import。
 from lidaxiao.textutil import (  # noqa: E402
     log, read_text, sweep_temp_files, write_text)
 
-
 from lidaxiao.config import (  # noqa: E402
     load_config, load_llm_key)
 
-
 # OpenCode Zen 免密车道: 固定公开 token, 不需要任何环境变量
 # 片尾视觉 CLI 车道: DeepSeek 网页版「识图模式」(走登录 token, 不需要 API key)
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -91,6 +73,7 @@ from lidaxiao.sources.bilibili import (  # noqa: E402
 from lidaxiao.sources.dynamic import (  # noqa: E402
     collect_dynamics, commit_dynamics)
 # 微博视频号: B 站没有的视频从这里补。取数/合并/下载都在 sources 下, 这里只编排。
+from lidaxiao.report.crossreplace import apply_replacements  # noqa: E402
 from lidaxiao.sources.merge import (  # noqa: E402
     as_video_item, format_list_counts)
 from lidaxiao.sources.weibo_plan import weibo_round  # noqa: E402
@@ -292,14 +275,10 @@ from lidaxiao.report.render import (  # noqa: E402
 # 主流程
 # =====================================================================
 def download_for(cfg, video):
-    """按来源下载: B 站走 bilidown + 直链兜底, 微博走微博直链(必须带 Referer)。
+    """按来源下载; 失败给 None, 由 process_video 判定"下载失败"并跳过。
 
-    返回值不变 —— 失败给 None, 由 process_video 判定"下载失败"并跳过。
-
-    参数形状是踩过的坑: `bilibili.download_video(cfg, bvid)` 第二参是 **bvid 字符串**
-    (它内部 `os.path.join(WORKDIR, "downloads", bvid)`), 传整个 video dict 会立刻
-    TypeError, 而且崩在队列第一支 —— 2026-11-26 线上就是这样一轮报告全没产出。
-    微博那支相反, `download_weibo_video(cfg, item)` 要的是整个 item (id + 直链)。
+    参数形状踩过坑: B 站那支第二参是 **bvid 字符串**(内部 path.join), 传 dict 立刻
+    TypeError 并崩在队列第一支(2026-11-26 一轮零报告); 微博那支相反, 要整个 item。
     """
     bvid = video["bvid"]
     if (video or {}).get("source") == "weibo":
@@ -392,12 +371,9 @@ def process_video(cfg, api_key, video):
 def run_queue(cfg, api_key, queue, touched, isolate=False):
     """逐个处理 -> (成功, 失败)。
 
-    S 的口径 = 报告里真的多出一节。分析失败但章节已落盘的 partial 也算 S —
-    督查第三个等式是"报告新增视频节数 = S", 按节数算才对得上; 下载就失败(rp 为
-    None)才计入 F。
-
-    isolate=True 只给微博补充队列用: 每条独立兜底, 一条炸了不影响其它条目,
-    更不影响 B 站链路。B 站那条保持原样 (异常照旧往上抛, 不偷偷吞掉)。
+    S 的口径 = 报告里真的多出一节: 分析失败但章节已落盘的 partial 也算 S(第三个
+    等式按节数算), 只有 rp 为 None(下载就失败)才计入 F。isolate=True 只给微博补
+    充队列用 —— 一条炸了不影响其它条目; B 站那条照旧上抛, 不偷偷吞掉。
     """
     ok_n = fail_n = 0
     for v in queue:
@@ -537,10 +513,8 @@ def main():
         done = processed_bvids()
         status_map = processed_status_map()
 
-        # 2. 确定 B 站候选: force=仅最新; 首次运行=仅最新;
-        #    常规=前天以来未处理/失败/部分成功的视频 (按时间从旧到新)。
-        #    这里**不再提前 return 0** —— 微博有自己的队列, B 站没新视频时也要往下走,
-        #    否则微博独有视频会被一起跳过 (那就是静默漏采)。
+        # 2. 确定 B 站候选: force=仅最新; 首次=仅最新; 常规=前天以来未处理/失败/部分成功。
+        #    这里**不提前 return 0**: 微博有自己的队列, B 站没新视频时也得往下走。
         if args.force:
             candidates = [latest] if latest else []
             log("--force 模式: 强制处理最新视频")
@@ -566,8 +540,7 @@ def main():
         # 窗口内他 B 站的发布量, 否则窗口外的旧片会被当成"微博独有"再下一遍。
         log(f"队列: bili={len(candidates)} weibo={len(wqueue)} "
             f"合计={len(candidates) + len(wqueue)} ｜ B站池={len(space)}")
-        # 决策用的六个数在**开跑前**就打一次: 2026-11-26 那次队列第一支就崩,
-        # 结果督查要的合并行到死都没印出来, 事后只能靠猜。跑完再打一次带 S/F 的。
+        # 开跑前先打一次六数: 队列第一支就崩的那次, 这行到死都没印出来(2026-11-26)。
         log(format_list_counts(len(candidates), plan["counts"],
                                wsnap.get("cards"), wsnap.get("videos")))
 
@@ -580,9 +553,13 @@ def main():
         if candidates and latest:
             write_text(last_file, latest["bvid"] + "\n")
             log(f"状态已更新: last_bvid={latest['bvid']}")
+        # 往轮发过的微博节, 这轮由 B 站重出 -> 删旧节, 同一内容只留 B 站那条
+        replaced, _skipped = apply_replacements(plan.get("replaced"), processed_status_map())
+        log(f"跨源替换(微博节已删)={replaced}")
         log(format_list_counts(len(candidates), plan["counts"],
                                wsnap.get("cards"), wsnap.get("videos"),
                                succeeded, failed))
+        log(f"报告节: 追加={succeeded} 删除={replaced} 净增={succeeded - replaced}")
 
         # 5. 输出确认
         if touched:
