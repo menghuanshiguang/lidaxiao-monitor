@@ -63,11 +63,13 @@ def main():
     print("\n=== B. 自行切行（反相 + 行投影，逐行识别）===")
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     rows = rows_dark_on_light(gray)
+    # 模型训练分布是"白字黑底", 截图是黑字白底 -> 反相后再裁, 否则等于喂反色
+    inv_img = cv2.bitwise_not(img)
     print(f"切出 {len(rows)} 行，取前 {a.limit} 行识别：")
     ok = 0
     for y0, y1 in rows[: a.limit]:
         pad = 6
-        crop = img[max(0, y0 - pad):min(h, y1 + pad), :]
+        crop = inv_img[max(0, y0 - pad):min(h, y1 + pad), :]
         out = rec(crop, is_band=True)
         text = " ".join(o[2] for o in out if o[2]).strip()
         score = min((o[3] for o in out), default=0.0)
@@ -75,6 +77,12 @@ def main():
             ok += 1
         print(f"  [{y0:4d}-{y1:4d}] score={score:.2f} {text}")
     print(f"\n有输出行数: {ok}/{min(len(rows), a.limit)}")
+
+    print("\n=== C. 整图反相后直喂（极性修正后的检测）===")
+    boxes2 = rec(inv_img)
+    print(f"检出 {len(boxes2)} 行")
+    for y, x, text, score in boxes2[:8]:
+        print(f"  y={y:4.0f} score={score:.2f} {text}")
     return 0
 
 
