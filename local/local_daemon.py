@@ -579,10 +579,21 @@ def commit_state(args, tag="local"):
 
 
 def publish_reports(args, tag="local"):
-    """把生成的 reports/ 自动提交并推送到 GitHub docs/reports; tag 标识 local/cloud"""
+    """把生成的 reports/ 自动提交并推送到 GitHub docs/reports; tag 标识 local/cloud
+
+    跨源替换的删节落在这里, 因为这是报告唯一的写盘点: 线上真正发布的是
+    `docs/reports/<date>.md`(合并的 old 侧), 只改本地 `reports/` 那份永远不生效;
+    而删 old 侧又会被 `_merge_report`「旧有新无的节原样补回」搬回来。所以删除只在
+    `merged` 上、写盘之前做一次(run 45939046960 证明前两处都不行)。
+    """
+    from lidaxiao.report import crossreplace
+    from lidaxiao.textutil import read_text, sweep_temp_files, write_text
+
     reports_dir = os.path.join(WORKDIR, "reports")
     docs_dir = os.path.join(WORKDIR, "docs", "reports")
-    if not os.path.isdir(reports_dir):
+    handoff = crossreplace.load_handoff()      # 读即消费: 一份决定只用一次
+    drops = handoff["drops"]
+    if not os.path.isdir(reports_dir) and not drops:
         log("没有 reports/ 目录, 跳过发布")
         return
     baseline = datetime.datetime.now(CN_TZ).date() - datetime.timedelta(days=2)
@@ -602,38 +613,61 @@ def publish_reports(args, tag="local"):
             return False
 
     daily = sorted(f for f in os.listdir(reports_dir)
-                   if f.endswith(".md") and re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f) and is_recent(f))
-    if not daily:
+                   if f.endswith(".md") and re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f) and is_recent(f)) \
+        if os.path.isdir(reports_dir) else []
+    # 待处理日期 = 本 run 新写的日报 ∪ 待删微博节所在的已发布报告。后者必不可少:
+    # 云端 checkout 后 reports/ 是空的, 微博节只在 docs/reports 那份里。
+    dates = {f[:-3] for f in daily}
+    for pair in drops:
+        d = pair.get("weibo_date") or ""
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", d) and os.path.exists(
+                os.path.join(docs_dir, d + ".md")):
+            dates.add(d)
+    if not dates:
         log("没有最近(昨天以来)日报文件, 跳过发布")
         return
 
     os.makedirs(docs_dir, exist_ok=True)
-    for f in daily:
+    removed_total = 0
+    for date in sorted(dates):
+        f = date + ".md"
         src = os.path.join(reports_dir, f)
         dst = os.path.join(docs_dir, f)
-        if os.path.exists(dst):
-            try:
-                old_text = open(dst, encoding="utf-8").read()
-                new_text = open(src, encoding="utf-8").read()
-                merged = _merge_report(new_text, old_text)
-                with open(dst, "w", encoding="utf-8") as fout:
-                    fout.write(merged)
+        has_src, has_dst = os.path.exists(src), os.path.exists(dst)
+        try:
+            new_text = read_text(src) if has_src else ""
+            if has_src and has_dst:
+                merged = _merge_report(new_text, read_text(dst))
                 log(f"报告已合并: {f}")
-            except Exception as e:
-                log(f"⚠️ 合并报告失败({f}), 回退为覆盖: {e}")
+            elif has_dst:
+                merged = read_text(dst)        # 本 run 没写这份, 只可能有待删的微博节
+            else:
+                merged = new_text
+        except Exception as e:
+            log(f"⚠️ 合并报告失败({f}), 回退为覆盖: {e}")
+            if has_src:
                 shutil.copy2(src, dst)
-        else:
-            shutil.copy2(src, dst)
-    # latest.md = 最新日报
-    latest = daily[-1]
-    shutil.copy2(os.path.join(docs_dir, latest), os.path.join(docs_dir, "latest.md"))
-    # 重建 index.md
+            continue
+        if not merged.strip():
+            continue
+        out, removed = crossreplace.drop_from_text(merged, drops)
+        removed_total += removed
+        if has_src or removed:
+            write_text(dst, out)               # 原子写: 中断也不留半份
+    # 重建 latest.md / index.md: 必须在本轮删节之后, 否则 latest 还是删节前那份
+    sweep_temp_files(docs_dir, min_age_seconds=0)   # 发布被序列化, 这里的 tmp 都是死进程留的
     index_daily = sorted(f for f in os.listdir(docs_dir)
                          if re.match(r"^\d{4}-\d{2}-\d{2}\.md$", f))
+    if index_daily:
+        shutil.copy2(os.path.join(docs_dir, index_daily[-1]),
+                     os.path.join(docs_dir, "latest.md"))
     links = "\n".join(f"- [{f[:-3]}](./{f})" for f in index_daily)
     with open(os.path.join(docs_dir, "index.md"), "w", encoding="utf-8") as f:
         f.write("# 📺 李大霄视频日报索引\n\n" + links + "\n")
 
+    log(f"跨源替换(微博节已删)={removed_total}")
+    log(f"报告节: 追加={handoff['added']} 删除={removed_total} "
+        f"净增={handoff['added'] - removed_total}")
     log("复制报告到 docs/reports 完成, 准备 git 提交推送")
     try:
         subprocess.run(["git", "add", "docs/reports", "state"], cwd=WORKDIR,

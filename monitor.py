@@ -73,7 +73,7 @@ from lidaxiao.sources.bilibili import (  # noqa: E402
 from lidaxiao.sources.dynamic import (  # noqa: E402
     collect_dynamics, commit_dynamics)
 # 微博视频号: B 站没有的视频从这里补。取数/合并/下载都在 sources 下, 这里只编排。
-from lidaxiao.report.crossreplace import apply_replacements  # noqa: E402
+from lidaxiao.report.crossreplace import apply_replacements, save_handoff  # noqa: E402
 from lidaxiao.sources.merge import (  # noqa: E402
     as_video_item, format_list_counts)
 from lidaxiao.sources.weibo_plan import weibo_round  # noqa: E402
@@ -489,6 +489,9 @@ def main():
     lock = RunLock(os.path.join(WORKDIR, "data", "monitor.lock"))
     if not lock.acquire():
         return 0
+    # 上一跑若在交接之后、发布之前崩了, data/ 里会留下待删列表。它不是本轮的,
+    # 拿锁后立刻清掉, 免得发布段拿着陈旧决定去删节。
+    save_handoff([], 0)
     # 中断残留识别: 进程若在 os.replace 之前被杀, 会留下 <name>.tmp.<pid> ——
     # 主文件是完整的旧版, 那种 tmp 只是垃圾。拿锁后清掉够旧的(600s), 不抢正在写的。
     for _leftover in sweep_temp_files(STATE_DIR, os.path.join(WORKDIR, "reports")):
@@ -553,13 +556,15 @@ def main():
         if candidates and latest:
             write_text(last_file, latest["bvid"] + "\n")
             log(f"状态已更新: last_bvid={latest['bvid']}")
-        # 往轮发过的微博节, 这轮由 B 站重出 -> 删旧节, 同一内容只留 B 站那条
-        replaced, _skipped = apply_replacements(plan.get("replaced"), processed_status_map())
-        log(f"跨源替换(微博节已删)={replaced}")
+        # 往轮发过的微博节, 这轮由 B 站重出 -> 删旧节, 同一内容只留 B 站那条。
+        # 这里只**判定**要删哪些; 真正删在发布段对合并后的报告做(见 crossreplace 头注)。
+        drops, _skipped = apply_replacements(plan.get("replaced"), processed_status_map())
+        save_handoff(drops, succeeded)
+        log(f"跨源替换(待删微博节)={len(drops)}")
         log(format_list_counts(len(candidates), plan["counts"],
                                wsnap.get("cards"), wsnap.get("videos"),
                                succeeded, failed))
-        log(f"报告节: 追加={succeeded} 删除={replaced} 净增={succeeded - replaced}")
+        log(f"报告节(队列): 追加={succeeded}")
 
         # 5. 输出确认
         if touched:

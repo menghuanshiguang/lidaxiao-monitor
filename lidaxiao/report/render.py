@@ -117,16 +117,10 @@ def drop_section(text, key):
     }
 
 
-def remove_section(date_str, key):
-    """按报告日期删节并写盘; 返回 info, removed=False 表示没有这一节(不写盘)。"""
-    rp = report_path(date_str) if date_str else ""
-    if not rp or not os.path.exists(rp):
-        return {"removed": False, "path": rp, "reason": "报告不存在"}
-    out, info = drop_section(read_text(rp), key)
-    info["path"] = rp
-    if info.get("removed"):
-        write_text(rp, out)
-    return info
+# 删节不再有「按日期找文件写盘」这个入口: 生产里真正发布的文件是 docs/reports/ 那份,
+# 本地 reports/ 被 .gitignore 忽略、云端 checkout 后为空(run 45939046960 就死在
+# `报告不存在` 这条上)。删节只走 crossreplace.drop_from_text, 在 publish_reports
+# 合并后的文本上做, 单一写盘点。
 
 
 def upsert_report(video, section_md, summary_line, list_line):

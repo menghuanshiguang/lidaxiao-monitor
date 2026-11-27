@@ -131,29 +131,26 @@ chk("整文件变小但不为空", _info["bytes_after"] < _info["bytes_before"] 
 chk("没有该节时原样返回且不标记删除",
     R.drop_section(_new, "wb5369798433178131")[1]["removed"] is False)
 
-print("== 跨源替换: 只有 B 站这次真出了章节才删 ==")
+print("== 跨源替换: 只有 B 站这次真出了章节才删(判定层) ==")
+# 判定与落盘是两层: 这里只验「决定删哪些」; 真正删节走 publish_reports,
+# 见 tests/test_crossreplace_publish.py —— 第一版就是只在函数层测过, 线上没生效。
 from lidaxiao.report import crossreplace as CR  # noqa: E402
 _pairs = [{"bvid": "BV1hv1pz2EbP", "weibo_key": "wb5369798433178131",
            "weibo_id": "5369798433178131",
            "weibo_title": "六大举措在发力 稳市曙光或已出现", "weibo_date": "2026-11-27"}]
-_tmp2 = tempfile.mkdtemp()
-_orig2 = R.report_path
-R.report_path = lambda d: os.path.join(_tmp2, f"{d}.md")
-try:
-    open(R.report_path("2026-11-27"), "w", encoding="utf-8").write(_real_text)
-    _n, _skip = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "error"})   # 下载就失败
-    chk("B 站没出章节时一节都不删", _n == 0 and _skip, (_n, _skip))
-    chk("报告原地没动(字节不变)",
-        os.path.getsize(R.report_path("2026-11-27")) == len(_real_text.encode("utf-8")))
-    _n2, _skip2 = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "ok"})
-    chk("B 站出了章节才删", _n2 == 1 and not _skip2, (_n2, _skip2))
-    _after = open(R.report_path("2026-11-27"), encoding="utf-8").read()
-    chk("落盘后微博节真的没了", "wb5369798433178131" not in _after)
-    chk("落盘后 B 站节还在", "BV1hv1pz2EbP" in _after)
-    _n3, _skip3 = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "ok"})
-    chk("重复调用不会误删别的东西(已无该节)", _n3 == 0 and _skip3, (_n3, _skip3))
-finally:
-    R.report_path = _orig2
+_d, _skip = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "error"})   # 下载就失败
+chk("B 站没出章节 -> 不列入待删", _d == [] and bool(_skip), (_d, _skip))
+_d2, _skip2 = CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "ok"})
+chk("B 站出了章节 -> 列入待删", len(_d2) == 1 and not _skip2, (_d2, _skip2))
+chk("待删项带着微博键与报告日期(发布段靠它找文件)",
+    _d2[0].get("weibo_key") == "wb5369798433178131"
+    and _d2[0].get("weibo_date") == "2026-11-27", _d2)
+chk("partial(分析失败但章节在)也删",
+    len(CR.apply_replacements(_pairs, {"BV1hv1pz2EbP": "partial"})[0]) == 1)
+chk("没有状态记录时按未出章节处理",
+    CR.apply_replacements(_pairs, {})[0] == [])
+chk("配对里没有微博键时不删(C 站那类无键条目)",
+    CR.apply_replacements([{"bvid": "BV1hv1pz2EbP", "weibo_key": ""}], {})[0] == [])
 
 print(f"\n{OK} passed, {FAIL} failed")
 raise SystemExit(1 if FAIL else 0)
