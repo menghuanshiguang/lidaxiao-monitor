@@ -5,6 +5,13 @@
     "enabled": true,
     "limit": 10
   },
+  "weibo": {
+    "enabled": true,
+    "uid": "1645823934",
+    "sim_threshold": 0.9,
+    "window_hours": 6,
+    "max_age_days": 7
+  },
   "frame_interval": 0.0,
   "ocr_confidence": 0.5,
   "min_subtitle_chars": 30,
@@ -106,5 +113,14 @@
     "vote": true,
     "pad_a": 6,
     "pad_b": 12
+  },
+  "llm_free": {
+    "enabled": true,
+    "provider": "free-gateway",
+    "base_url": "http://127.0.0.1:18787/v1",
+    "model": "",
+    "temperature": 0.3,
+    "max_tokens": 32768,
+    "timeout": 300
   }
 }

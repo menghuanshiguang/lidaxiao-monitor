@@ -15,7 +15,8 @@ workflow 里没有开关可找。
   1) 本地原子锁 `RunLock`(复用 lidaxiao/runtime/state.py): 跨「预检 -> 派发 ->
      确认 run 出现」全程持有, 不松手
   2) 派发前查 GitHub: `monitor.yml` 有 `queued` / `in_progress` 就跳过, 一发都不发
-  3) 本地持久记账 `state/triggered_slots.txt`: 同一 slot 派过就再也不派
+  3) 本地持久记账 `data/triggered_slots.txt`: 同一 slot 派过就再也不派
+     (放 data/ 而不是 state/: `git add state` 会把账本带进发布提交)
 
 第 3 层不能砍: dispatch 返回到 run 出现在 API 之间有秒级延迟, 同秒两个进程触发时
 第 2 层查到的都是空, 必须靠本地记账兜。
@@ -50,11 +51,12 @@ WORKFLOW_FILE = "monitor.yml"
 WORKFLOW_PATH = ".github/workflows/monitor.yml"
 API = "https://api.github.com"
 SLOTS = ("14:40", "20:00")          # 时区钉死 CN_TZ, 不许用裸 datetime.now()
-GRACE_MINUTES = 60                  # 错过 slot 后 60 分钟内仍补发, 覆盖机器刚睡醒
 CONFIRM_WAIT_SECONDS = 60           # 派发后等 run 出现在 API 里的上限
 CONFIRM_POLL_SECONDS = 5
 
-LEDGER_PATH = os.path.join(STATE_DIR, "triggered_slots.txt")
+# 记账放 data/: 本机文件, 不该进仓库。放 state/ 的话 local_daemon 的 `git add state`
+# 会把它带上去(加 .gitignore 又会让 `git add state` 报 pathspec ignored, 把发布弄挂)。
+LEDGER_PATH = os.path.join(WORKDIR, "data", "triggered_slots.txt")
 LOCK_PATH = os.path.join(WORKDIR, "data", "trigger.lock")
 
 
@@ -74,21 +76,31 @@ def slot_key(dt):
     return dt.strftime("%Y-%m-%d %H:%M")
 
 
-def due_slot(now, grace_minutes=GRACE_MINUTES, slots=SLOTS):
-    """最近一个已到点、且仍在补发窗口内的 slot; 没有返回 None。
+def slot_deadline(slot, slots=SLOTS):
+    """该 slot 的补发有效期: 到**另一个 slot 的次日那一格**为止。
 
-    只返回**一个**: 一夜没开机醒来时, 晚的那个 slot 优先, 早的那个不补,
-    免得一次苏醒连发两发把云端排成两轮。
+    14:40 的槽有效到次日 20:00, 20:00 的槽有效到次日 14:40。
+    这样昨晚 20:00 之后关掉、第二天中午才打开(实测挂起 7h39m)能补上,
+    而第二天下午不会再去补昨天的槽 —— 固定 60 分钟窗口在那种场景下一次都补不了。
+    """
+    me = slot.strftime("%H:%M")
+    others = [x for x in slots if x != me]
+    if not others:
+        raise RuntimeError("slots 里至少要有两个点")
+    hh, mm = others[0].split(":")
+    d = slot.date() + datetime.timedelta(days=1)
+    return datetime.datetime(d.year, d.month, d.day, int(hh), int(mm), tzinfo=CN_TZ)
+
+
+def due_slot(now, slots=SLOTS):
+    """最近一个已到点、且仍在有效期内的 slot; 没有返回 None。
+
+    只返回**一个**(取最近那个): 睡醒时早的槽已被晚的覆盖, 不连发两发把云端排两轮。
     """
     days = [now.date(), now.date() - datetime.timedelta(days=1)]
     cands = [s for d in days for s in slot_datetimes(d, slots)]
-    passed = [s for s in cands if s <= now]
-    if not passed:
-        return None
-    last = max(passed)
-    if (now - last).total_seconds() > grace_minutes * 60:
-        return None
-    return last
+    due = [s for s in cands if s <= now < slot_deadline(s, slots)]
+    return max(due) if due else None
 
 
 def ledger_entries(path):
@@ -135,7 +147,7 @@ def should_skip(slot_dt, path):
     latest = max([k for k in keys if k], default="")
     if latest and latest > key:
         return True, (f"记账里最新的 slot 是 {latest}, 比本次 {key} 还晚 —— "
-                      f"系统时间被往回拨过, 不派")
+                      f"这个槽已被更晚那次覆盖(或系统时间被往回拨), 不补")
     return False, ""
 
 
@@ -294,6 +306,9 @@ def main(argv=None, fetch=None, now=None, ledger_path=None, lock_path=None,
         return 2
     log(f"🔑 token 来源: {src}")
 
+    # 全新安装场景仓库里没有 data/(.gitignore 里是 /data/, 云端那个目录由 workflow 建),
+    # RunLock 用 os.open(O_CREAT) 但不建父目录 —— 不补这一行, 计划任务第一次跑就 rc=1。
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
     lock = RunLock(lock_path)
     if not lock.acquire():
         log("⏭ 另一个 trigger 实例正在运行, 本次不动")

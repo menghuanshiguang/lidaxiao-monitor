@@ -90,6 +90,12 @@ from lidaxiao.sources.bilibili import (  # noqa: E402
 # 动态监测: 与视频链路完全独立的一条支线, 失败只记日志
 from lidaxiao.sources.dynamic import (  # noqa: E402
     collect_dynamics, commit_dynamics)
+# 微博视频号: B 站没有的视频从这里补。取数/合并/下载都在 sources 下, 这里只编排。
+from lidaxiao.sources.merge import (  # noqa: E402
+    as_video_item, format_list_counts)
+from lidaxiao.sources.weibo_plan import weibo_round  # noqa: E402
+from lidaxiao.sources.weibo_video import (  # noqa: E402
+    download_weibo_video, find_downloaded_weibo)
 
 
 # ---------------- B站 API (view 信息) ----------------
@@ -285,6 +291,22 @@ from lidaxiao.report.render import (  # noqa: E402
 # =====================================================================
 # 主流程
 # =====================================================================
+def download_for(cfg, video):
+    """按来源下载: B 站走 bilidown + 直链兜底, 微博走微博直链(必须带 Referer)。
+
+    返回值不变 —— 失败给 None, 由 process_video 判定"下载失败"并跳过。
+
+    参数形状是踩过的坑: `bilibili.download_video(cfg, bvid)` 第二参是 **bvid 字符串**
+    (它内部 `os.path.join(WORKDIR, "downloads", bvid)`), 传整个 video dict 会立刻
+    TypeError, 而且崩在队列第一支 —— 2026-11-26 线上就是这样一轮报告全没产出。
+    微博那支相反, `download_weibo_video(cfg, item)` 要的是整个 item (id + 直链)。
+    """
+    bvid = video["bvid"]
+    if (video or {}).get("source") == "weibo":
+        return find_downloaded_weibo(bvid) or download_weibo_video(cfg, video)
+    return find_downloaded_mp4(bvid) or download_video(cfg, bvid)
+
+
 def process_video(cfg, api_key, video):
     """处理单个视频: 下载->字幕->分析->报告; 返回 (ok, report_path, note)"""
     bvid = video["bvid"]
@@ -296,10 +318,8 @@ def process_video(cfg, api_key, video):
             video["pubdate"] = int(time.time())   # 兜底: 用当前时间
     log(f"---- 处理视频: {video.get('title', '')} ({bvid}) ----")
 
-    # 下载
-    mp4 = find_downloaded_mp4(bvid)
-    if not mp4:
-        mp4 = download_video(cfg, bvid)
+    # 下载 (B 站: bilidown + 直链兜底; 微博: 直链 + Referer)
+    mp4 = download_for(cfg, video)
     mp4, dl_warn = ensure_complete_download(cfg, video, mp4)
     if not mp4:
         note = f"下载失败(重试后仍失败), 已跳过: {bvid}"
@@ -367,6 +387,40 @@ def process_video(cfg, api_key, video):
 
 
 
+
+
+def run_queue(cfg, api_key, queue, touched, isolate=False):
+    """逐个处理 -> (成功, 失败)。
+
+    S 的口径 = 报告里真的多出一节。分析失败但章节已落盘的 partial 也算 S —
+    督查第三个等式是"报告新增视频节数 = S", 按节数算才对得上; 下载就失败(rp 为
+    None)才计入 F。
+
+    isolate=True 只给微博补充队列用: 每条独立兜底, 一条炸了不影响其它条目,
+    更不影响 B 站链路。B 站那条保持原样 (异常照旧往上抛, 不偷偷吞掉)。
+    """
+    ok_n = fail_n = 0
+    for v in queue:
+        try:
+            ok, rp, note = process_video(cfg, api_key, v)
+            status = "ok" if ok else ("error" if rp is None else "partial")
+            if note == "无字幕,跳过分析":
+                status = "no-subtitle"
+            mark_processed(v["bvid"], v.get("title", ""), status)
+            if rp and rp not in touched:
+                touched.append(rp)
+            if rp:
+                ok_n += 1
+            else:
+                fail_n += 1
+            log(f"状态: {v['bvid']} -> {status} ({note})")
+        except Exception as exc:
+            if not isolate:
+                raise
+            fail_n += 1
+            log(f"⚠️ 微博条目处理异常 (已忽略): {v.get('bvid')} "
+                f"{type(exc).__name__}: {exc}")
+    return ok_n, fail_n
 
 
 def dynamics_target_date(touched, today=None):
@@ -470,62 +524,65 @@ def main():
     touched = []          # 本次 run 写过的报告; finally 里的动态要用它决定落哪份
     try:
         # 1. 检测更新
-        videos = get_space_videos(cfg, cfg["limit"])
-        if not videos:
+        space = get_space_videos(cfg, cfg["limit"])
+        if not space:
             log("❌ 无法获取UP主视频列表(风控或网络问题)")
             return 1
         video_ok = True
         # 只处理 baseline(前天)及之后发布的视频, 更早的忽略 (--force 豁免: 始终取最新)
-        if not args.force:
-            videos = [v for v in videos if is_from_baseline(v)]
-            if not videos:
-                log("前天以来暂无新视频, 退出")
-                return 0
-        latest = videos[0]
+        videos = space if args.force else [v for v in space if is_from_baseline(v)]
+        latest = videos[0] if videos else None
         last_file = os.path.join(STATE_DIR, "last_bvid.txt")
         last_bvid = read_text(last_file).strip()
         done = processed_bvids()
         status_map = processed_status_map()
 
-        # 前天以来所有视频都已成功处理时直接退出; 有失败/部分成功/未处理则继续
-        if not args.force and all(
-            v["bvid"] in done and is_success_status(status_map.get(v["bvid"]))
-            for v in videos
-        ):
-            log(f"无新视频 (前天以来均已处理), 退出")
-            return 0
-
-        # 2. 确定候选: force=仅最新; 首次运行=仅最新;
-        #    常规=前天以来未处理/失败/部分成功的视频 (按时间从旧到新)
+        # 2. 确定 B 站候选: force=仅最新; 首次运行=仅最新;
+        #    常规=前天以来未处理/失败/部分成功的视频 (按时间从旧到新)。
+        #    这里**不再提前 return 0** —— 微博有自己的队列, B 站没新视频时也要往下走,
+        #    否则微博独有视频会被一起跳过 (那就是静默漏采)。
         if args.force:
-            candidates = [latest]
+            candidates = [latest] if latest else []
             log("--force 模式: 强制处理最新视频")
         elif not last_bvid:
-            candidates = [latest]
+            candidates = [latest] if latest else []
             log("首次运行, 处理最新视频")
         else:
             cand = [v for v in videos
                     if v["bvid"] not in done or not is_success_status(status_map.get(v["bvid"]))]
             candidates = list(reversed(cand))        # 旧的在前
-            if not candidates:
-                log("无新视频 (最新已处理), 退出")
-                return 0
-            log(f"发现 {len(candidates)} 个待处理视频")
+            if candidates:
+                log(f"发现 {len(candidates)} 个待处理视频")
+            elif not videos:
+                log("前天以来暂无新视频")
+            else:
+                log("无新视频 (前天以来均已处理)")
 
-        # 3. 逐个处理
-        for v in candidates:
-            ok, rp, note = process_video(cfg, api_key, v)
-            status = "ok" if ok else ("error" if rp is None else "partial")
-            if note == "无字幕,跳过分析":
-                status = "no-subtitle"
-            mark_processed(v["bvid"], v.get("title", ""), status)
-            if rp and rp not in touched:
-                touched.append(rp)
-            log(f"状态: {v['bvid']} -> {status} ({note})")
+        # 2.5 微博: **先取两份列表再决定下载谁**。同一条内容优先走 B 站下载,
+        #     微博只补 B 站没有的; 置顶/超窗/已处理的一律不进队列。
+        wsnap, plan = weibo_round(cfg, space, done)
+        wqueue = [as_video_item(i) for i in plan["queue"]]
+        # 池 = 本次 B 站列表条数(= 跨源配对能看到的全部 B 站条目)。它必须大于微博
+        # 窗口内他 B 站的发布量, 否则窗口外的旧片会被当成"微博独有"再下一遍。
+        log(f"队列: bili={len(candidates)} weibo={len(wqueue)} "
+            f"合计={len(candidates) + len(wqueue)} ｜ B站池={len(space)}")
+        # 决策用的六个数在**开跑前**就打一次: 2026-11-26 那次队列第一支就崩,
+        # 结果督查要的合并行到死都没印出来, 事后只能靠猜。跑完再打一次带 S/F 的。
+        log(format_list_counts(len(candidates), plan["counts"],
+                               wsnap.get("cards"), wsnap.get("videos")))
 
-        # 4. 更新状态文件
-        write_text(last_file, latest["bvid"] + "\n")
-        log(f"状态已更新: last_bvid={latest['bvid']}")
+        # 3. 逐个处理: B 站队列在前 (这段与接入微博前逐字相同), 微博补在后
+        succeeded, failed = run_queue(cfg, api_key, candidates, touched)
+        ok_w, fail_w = run_queue(cfg, api_key, wqueue, touched, isolate=True)
+        succeeded, failed = succeeded + ok_w, failed + fail_w
+
+        # 4. 更新状态文件 (只推进 B 站游标; 微博按 id 去重, 没有游标)
+        if candidates and latest:
+            write_text(last_file, latest["bvid"] + "\n")
+            log(f"状态已更新: last_bvid={latest['bvid']}")
+        log(format_list_counts(len(candidates), plan["counts"],
+                               wsnap.get("cards"), wsnap.get("videos"),
+                               succeeded, failed))
 
         # 5. 输出确认
         if touched:
