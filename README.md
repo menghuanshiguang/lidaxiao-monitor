@@ -2,7 +2,7 @@
 
 [![auto monitor](https://img.shields.io/github/actions/workflow/status/menghuanshiguang/lidaxiao-monitor/monitor.yml?label=auto%20monitor)](https://github.com/menghuanshiguang/lidaxiao-monitor/actions)
 
-**最新日报**：[latest.md](docs/reports/latest.md) · [全部日报索引](docs/reports/index.md) · [周度总结](docs/reports/weekly.md)
+**最新日报**：[latest.md](docs/reports/latest.md) · [全部日报索引](docs/reports/index.md) · [周度总结](docs/reports/weekly.md) · **操作建议**：[signal/latest.md](docs/signal/latest.md) · [全部信号](docs/signal/index.md)
 
 盯住李大霄的 B 站主页：新视频自动下载、抽字幕、出分析，每个交易日写成一份日报。
 
