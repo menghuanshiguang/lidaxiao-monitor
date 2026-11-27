@@ -58,6 +58,9 @@ def _stub_git():
     LD.subprocess = types.SimpleNamespace(run=lambda *a, **k: _FakeProc())
     LD._ensure_git_user = lambda: None
     LD._push = lambda: True
+    # 本文件只验跨源替换; 操作建议那条线在这里关掉, 否则它会按 tmp 里的报告
+    # 往 signal 模块的默认 WORKDIR(真仓库) 写文件 —— 本机真踩过一次。
+    LD._publish_signal = lambda *a, **k: None
 
 
 _stub_git()

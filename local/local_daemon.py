@@ -683,8 +683,49 @@ def publish_reports(args, tag="local"):
                        cwd=WORKDIR, check=True, capture_output=True, timeout=30)
         if _push():
             log("✅ 报告已提交并推送")
+            # 建议只挂在**日报发布成功之后**: 日报没产出就不生成, 宁可空一天,
+            # 也不许拿旧内容糊一份新的。它自己再提交一笔, 失败只记日志。
+            _publish_signal(args, daily, tag)
     except Exception as e:
         log(f"⚠️ 报告发布失败: {e}")
+
+
+def _publish_signal(args, daily, tag="cloud"):
+    """生成/发布当日操作建议 (docs/signal/)。异常一律吞掉: 不许影响日报, 也不许弄红 run。"""
+    try:
+        from lidaxiao.config import load_config, load_llm_key
+        from lidaxiao.report import signal as sg
+        from lidaxiao.textutil import read_text
+
+        dates = sorted({f[:-3] for f in daily or []})
+        if not dates:
+            log("建议: 本 run 没有发布日报, 不生成")
+            return
+        date = dates[-1]
+        text = read_text(os.path.join(WORKDIR, "docs", "reports", f"{date}.md"), "")
+        if not text.strip():
+            log(f"⚠️ 建议: 找不到已发布的 {date} 日报, 跳过生成")
+            return
+        sig, sections, dropped = sg.generate(
+            date, text, cfg=load_config(getattr(args, "config", None)),
+            api_key=load_llm_key(), prev=sg.load_prev())
+        out = sg.write_signal(sig, sections)
+        log(f"📌 建议: {date} {sig['stance']}/{sig['action']} 强度={sig['strength']} "
+            f"状态={sig['status']} 引用={len(sig['citations'])} 丢弃={len(dropped)} -> {out}")
+        subprocess.run(["git", "add", "docs/signal"], cwd=WORKDIR, check=True,
+                       capture_output=True, timeout=30)
+        _ensure_git_user()
+        diff = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=WORKDIR,
+                              capture_output=True, timeout=30)
+        if diff.returncode == 0:
+            log("建议无变化, 跳过提交")
+            return
+        subprocess.run(["git", "commit", "-m", f"docs: update signal [{tag}] [skip ci]"],
+                       cwd=WORKDIR, check=True, capture_output=True, timeout=30)
+        if _push():
+            log("✅ 建议已提交并推送")
+    except Exception as e:
+        log(f"⚠️ 建议生成/发布失败 (已忽略): {type(e).__name__}: {e}")
 
 
 def sync_state_from_remote():
