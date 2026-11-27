@@ -2,22 +2,11 @@
 
 ## 今日摘要
 - 视频《六大举措在发力 稳市曙光或已出现》: 三大指数与黄金在3500点附近神奇汇合
-- 视频《六大举措在发力 稳市曙光或已出现》: 三大指数与黄金在3500点附近神奇汇合
 
 ## 视频清单
-- [09:32] 六大举措在发力 稳市曙光或已出现 (wb5369798433178131) 05:44 ｜ source=weibo
 - [09:35] 六大举措在发力 稳市曙光或已出现 (BV1hv1pz2EbP) 05:45
 
-## 视频1:《六大举措在发力 稳市曙光或已出现》 (wb5369798433178131)
-
-> source=weibo ｜ 微博 id=5369798433178131 ｜ https://m.weibo.cn/status/5369798433178131
-
-> ⚠️ AI分析失败, 仅保留字幕
-
-> ⚠️ AI分析失败: free-gateway: free 网关 HTTP 429: {"error":{"message":"Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go","type":"upstream_error","code":"RATE_LIMIT","status":429}}
-
-
-## 视频2:《六大举措在发力 稳市曙光或已出现》 (BV1hv1pz2EbP)
+## 视频1:《六大举措在发力 稳市曙光或已出现》 (BV1hv1pz2EbP)
 
 【一句话摘要】
 李大霄认为恒生科技、黄金、上证三大标的前期在3500点附近"会师"探底，叠加六大稳市举措持续发力、两融余额收缩横住，市场企稳概率在提升，"稳定的曙光或已出现"，呼吁散户用余钱持好股、切忌加杠杆。
