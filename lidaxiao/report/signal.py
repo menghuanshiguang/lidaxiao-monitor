@@ -97,6 +97,21 @@ def _time_of(sections, key):
     return ""
 
 
+def _clip(q, limit=80):
+    """按句子边界截断, 别在半句处切开(摘要是给人读的, 断在逗号后像出错)。
+
+    截出来的仍然是原文前缀, 所以 `quote_ok` 的子串判定照样成立。
+    """
+    if len(q) <= limit:
+        return q
+    head = q[:limit]
+    for marks in ("。！？", "；，、,;"):
+        cut = max(head.rfind(ch) for ch in marks)
+        if cut >= MIN_QUOTE:                 # 太靠前就不值当, 宁可硬截
+            return head[:cut + 1] if marks == "。！？" else head[:cut]
+    return head
+
+
 def _pick_quote(body, limit=80):
     """从一节正文里取一句原话: 优先【一句话摘要】, 否则第一行有内容的正文。"""
     lines = [l.strip() for l in (body or "").splitlines()]
@@ -104,15 +119,15 @@ def _pick_quote(body, limit=80):
         if l.startswith("【一句话摘要】"):
             q = l.split("】", 1)[1].strip() if "】" in l else ""
             if q:
-                return q[:limit]
+                return _clip(q, limit)
             # 报告里这个标记单独占一行, 正文在下一行
             for nxt in lines[i + 1:]:
                 if nxt and not nxt.startswith((">", "#", "【")):
-                    return nxt[:limit]
+                    return _clip(nxt, limit)
             return ""
     for l in lines:
         if l and not l.startswith(">") and not l.startswith("#"):
-            return l[:limit]
+            return _clip(l, limit)
     return ""
 
 

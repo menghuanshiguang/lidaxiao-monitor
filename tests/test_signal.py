@@ -195,6 +195,15 @@ chk("白名单外的 stance/action 也算 degraded",
     S.build_signal(DATE, REPORT, payload={**PAYLOAD, "stance": "梭哈"})["status"] == "degraded")
 chk("LLM 返回不是 JSON 也算 degraded", S._parse_json("我看多，建议满仓。") is None)
 
+print("\n== 原话截断不落在半句上 ==")
+_long = "。".join(["一二三四五六七八九十"] * 12) + "。"
+_clipped = S._clip(_long, 80)
+chk("截断后是原文前缀(所以仍能过子串判定)", _long.startswith(_clipped))
+chk("截在句号上, 不是半句", _clipped.endswith("。"), _clipped[-12:])
+chk("长度不超过上限", len(_clipped) <= 80, len(_clipped))
+chk("够不到句子边界时硬截, 不返回空",
+    len(S._clip("一" * 200, 80)) == 80 and len(S._clip("甲乙丙丁戊", 80)) == 5)
+
 print("\n== 当天没内容 -> no_content, 原样延续上一份, 不许编 ==")
 EMPTY_REPORT = ("# 📺 李大霄视频日报 2026-11-28\n\n## 今日摘要\n\n## 视频清单\n\n"
                 "## 李大霄动态\n\n### 2026-11-28 09:00 · 视频投稿\n<!-- dynamic:1 -->\n原文(3 字): 没有\n")
