@@ -203,11 +203,14 @@ def _clean_payload(sections, payload, dropped):
         else:
             dropped.append((lv["asset"], f"点位 {lv['level']} 在引用正文里找不到"))
     assets = kept_assets
+    if not citations:
+        # 白名单过关、但一条引用都落不到报告上: 没有依据就不许有结论(宁缺毋滥)。
+        # 按 degraded 处理 —— 只留能从报告正文直接取到的原话, stance/action 沿用上一份。
+        # 八条判据里没有一条直接管这个, 但 `status=ok` 配零引用等于把一句无出处的话
+        # 标成"有据可查", 那是八条判据想防的东西换了个位置。
+        log("⚠️ 建议: 没有一条引用能落到报告正文上, 整份按 degraded 处理")
+        return None
     key_points = [str(k).strip() for k in (payload.get("key_points") or []) if str(k).strip()]
-    if key_points and not citations:
-        # 有结论却一条原话都落不到报告上: 只能当没有依据, 结论一并不要
-        log(f"⚠️ 建议: {len(key_points)} 条结论没有任何可定位的原话, 全部丢弃")
-        key_points = []
     return {"stance": stance, "action": action, "strength": strength, "horizon": horizon,
             "assets": assets[:6], "levels": levels,
             "key_points": key_points[:5], "citations": citations[:8]}

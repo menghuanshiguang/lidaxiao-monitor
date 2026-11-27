@@ -142,7 +142,21 @@ chk("够 10 字的原话才合格",
     S.quote_ok(secs, BV, "恒生科技探到367点、黄金探到3426美元/盎司") is True)
 _sig_short = S.build_signal(DATE, REPORT, payload={**PAYLOAD, "citations": [
     {"text": "3500点", "video": BV}]})
-chk("短引用整条丢掉, 不留坏数据", _sig_short["citations"] == [], _sig_short["citations"])
+chk("短引用整条丢掉, 不留坏数据",
+    all("3500点" != c["text"] for c in _sig_short["citations"]), _sig_short["citations"])
+chk("引用全被丢光 -> 整份降级, 不许 ok 配零引用", _sig_short["status"] == "degraded",
+    _sig_short["status"])
+
+print("\n== 引用全丢光时不许留一个 ok ==")
+_sig_allbad = S.build_signal(DATE, REPORT, payload={
+    **PAYLOAD, "citations": [{"text": "李大霄说满仓加杠杆必赚", "video": BV},
+                             {"text": "以太坊年底翻三倍", "video": WB}]})
+chk("status 降级", _sig_allbad["status"] == "degraded", _sig_allbad["status"])
+chk("不进任何模型给的结论", _sig_allbad["key_points"] == []
+    and _sig_allbad["assets"] == [] and _sig_allbad["levels"] == [], _sig_allbad)
+chk("留下的只有能从正文直接取到的原话",
+    all(norm(c["text"]) in norm(REPORT) for c in _sig_allbad["citations"]),
+    _sig_allbad["citations"])
 
 print("\n== 人为改错的引用必须被丢掉, 不许写进 JSON ==")
 BAD = "李大霄说满仓加杠杆必赚"
